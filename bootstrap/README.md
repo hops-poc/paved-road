@@ -10,12 +10,33 @@ on local state.
 One agent/job class → one role → one blast radius (PRD §8, §12). Nobody gets
 "deploy" in general; each role can only do the one thing its job needs.
 
-| Role | Assumed by | Trust condition (`sub`) | Can |
+`sub` alone can't tell `plan-readonly` and `deploy-dev` apart either — both
+would otherwise trust the same `repo:<org>/<repo>:pull_request` subject,
+which would let a plan-only job assume the write-capable role. Every role
+also requires a `job_workflow_ref` match, naming which reusable workflow
+*file* in `paved-road` the calling job actually runs — that's the real
+separator between "can plan" and "can write." See `iam.tf`'s trust-policy
+comments for the file-path convention this commits session 3 to.
+
+| Role | Assumed by | Trust condition (`sub` **and** `job_workflow_ref`) | Can |
 |---|---|---|---|
-| `plan-readonly` | any same-repo PR job (`terraform plan`) | `repo:<org>/<repo>:pull_request` | Read/describe the services in §12 of the PRD. Nothing that mutates state. |
-| `deploy-dev` | preview + dev deploy jobs | `repo:<org>/<repo>:pull_request` **and** `repo:<org>/<repo>:ref:refs/heads/main` | Write Lambda/DynamoDB/CloudFront/ECR resources named `hello-world-svc-{dev,pr-*}-*` |
-| `deploy-prod` | prod deploy job, post-approval | `repo:<org>/<repo>:environment:prod` | Write resources named `hello-world-svc-prod-*`. **Unassumable until the GitHub Environment reviewer approves** — the environment-scoped `sub` composes the approval gate with IAM instead of leaving it purely in Actions config. |
-| `agents-inference` | ReviewBot/Triage/Release/Incident | `pull_request`, `ref:refs/heads/main`, `environment:dev`, `environment:prod` | `bedrock:InvokeModel` on one allow-listed model + write to the ledger table. Nothing else — an agent identity is a credential like any other (DECISIONS.md §1). |
+| `plan-readonly` | any same-repo PR job (`terraform plan`) | `pull_request` + `plan.yml` | Read/describe the services in §12 of the PRD. Nothing that mutates state. |
+| `deploy-dev` | preview + dev deploy jobs | (`pull_request` or `ref:refs/heads/main`) + `deploy.yml` | Write Lambda/DynamoDB/ECR/logs/CloudWatch-alarm resources named `hello-world-svc-{dev,pr-*}-*`, plus CloudFront distribution management (unscopable by ARN pre-create — action list is the actual boundary there). |
+| `deploy-prod` | prod deploy job, post-approval | `environment:prod` + `deploy.yml` | Same shape, `hello-world-svc-prod-*` only. **Unassumable until the GitHub Environment reviewer approves** — the environment-scoped `sub` composes the approval gate with IAM instead of leaving it purely in Actions config. |
+| `agents-inference` | ReviewBot/Triage/Release/Incident | `pull_request`/`ref:refs/heads/main`/`environment:{dev,prod}` + `agents.yml` | `bedrock:InvokeModel` on one allow-listed model + write to the ledger table. Nothing else — an agent identity is a credential like any other (DECISIONS.md §1). |
+
+**Blast-radius note, fixed after review:** `deploy-dev`/`deploy-prod`'s
+scopable actions (`lambda:*`, `dynamodb:*`, `ecr:*`, `logs:*`,
+`cloudwatch:<alarm-actions>`) sit in statements with only named-resource
+ARNs — never in the same action list as a `"*"` resource. CloudFront is the
+one service genuinely unscopable pre-create (`CreateDistribution` requires
+`Resource: "*"` — an AWS API constraint), so its statement narrows the
+*action list* instead: only distribution-lifecycle calls, resource `"*"`.
+An earlier draft combined `lambda:*`/`dynamodb:*`/`ecr:*` with a blanket
+`"*"` resource in one statement, which — because IAM resource lists union,
+not intersect — silently granted account-wide write on those services
+regardless of the named ARNs listed alongside it (dev could delete prod).
+Don't recombine them for convenience later.
 
 ## The fork-isolation gap this doesn't close by itself — read before touching trust policies
 

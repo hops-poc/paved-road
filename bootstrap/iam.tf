@@ -17,7 +17,29 @@ locals {
 # ---------------------------------------------------------------------------
 # Every trust condition requires aud=sts.amazonaws.com AND a sub match. See
 # bootstrap/README.md's fork-isolation note before editing the `pull_request`
-# arms — sub alone does not distinguish a fork PR from a same-repo one.
+# arms — sub alone does not distinguish a fork PR from a same-repo one; that
+# isolation is enforced at the workflow layer (never request id-token: write
+# on a fork-triggered job), not here.
+#
+# sub alone also doesn't separate plan-readonly from deploy-dev: both would
+# otherwise trust the identical `repo:<org>/<repo>:pull_request` subject,
+# which would let a job that only needs to plan instead assume the
+# write-capable role. The second discriminator is `job_workflow_ref`, which
+# names the actual reusable-workflow file a job runs — this pins that
+# convention now so session 3 has to build to it, not invent it under
+# pressure:
+#   paved-road/.github/workflows/plan.yml     -> plan-readonly
+#   paved-road/.github/workflows/deploy.yml   -> deploy-dev, deploy-prod
+#   paved-road/.github/workflows/agents.yml   -> agents-inference
+# If session 3 lands the pipeline as one big service.yml instead of these
+# three files, this scoping silently stops discriminating — split the files,
+# don't just merge the conditions back to sub-only.
+
+locals {
+  job_workflow_ref_plan   = "${local.gh_owner_paved_road}/.github/workflows/plan.yml@*"
+  job_workflow_ref_deploy = "${local.gh_owner_paved_road}/.github/workflows/deploy.yml@*"
+  job_workflow_ref_agents = "${local.gh_owner_paved_road}/.github/workflows/agents.yml@*"
+}
 
 data "aws_iam_policy_document" "trust_plan_readonly" {
   statement {
@@ -36,6 +58,11 @@ data "aws_iam_policy_document" "trust_plan_readonly" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = ["repo:${local.gh_owner_repo}:pull_request"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = [local.job_workflow_ref_plan]
     }
   }
 }
@@ -62,6 +89,11 @@ data "aws_iam_policy_document" "trust_deploy_dev" {
         "repo:${local.gh_owner_repo}:ref:refs/heads/main",
       ]
     }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = [local.job_workflow_ref_deploy]
+    }
   }
 }
 
@@ -85,6 +117,11 @@ data "aws_iam_policy_document" "trust_deploy_prod" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = ["repo:${local.gh_owner_repo}:environment:prod"]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = [local.job_workflow_ref_deploy]
     }
   }
 }
@@ -111,6 +148,11 @@ data "aws_iam_policy_document" "trust_agents_inference" {
         "repo:${local.gh_owner_repo}:environment:dev",
         "repo:${local.gh_owner_repo}:environment:prod", # Release, Incident
       ]
+    }
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = [local.job_workflow_ref_agents]
     }
   }
 }
@@ -160,16 +202,19 @@ resource "aws_iam_role" "deploy_dev" {
 }
 
 data "aws_iam_policy_document" "deploy_dev_perms" {
+  # Scopable-by-ARN services — named-resource restricted. Never combine this
+  # action list with a "*" resource in the same or another statement; that
+  # would grant lambda:*/dynamodb:*/ecr:*/logs:* account-wide, including
+  # prod, and defeat the whole point of a per-env role (caught in review —
+  # an earlier draft of this file did exactly that).
   statement {
-    sid    = "WriteDevAndPreviewResources"
+    sid    = "WriteDevAndPreviewNamedResources"
     effect = "Allow"
     actions = [
       "lambda:*",
       "dynamodb:*",
-      "cloudfront:*",
       "ecr:*",
       "logs:*",
-      "cloudwatch:*",
     ]
     resources = [
       "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-dev*",
@@ -179,8 +224,34 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.svc_name_prefix}",
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-dev*",
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-pr-*",
-      "*", # CloudFront/CloudWatch alarms have no path-style resource scoping usable here; tightened in session 2 once modules/ fixes the exact shapes (see bootstrap/README.md)
     ]
+  }
+  # CloudWatch alarms ARE ARN-addressable — scope by name, same as everything else.
+  statement {
+    sid    = "ManageDevAndPreviewAlarms"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
+      "cloudwatch:DescribeAlarms", "cloudwatch:SetAlarmState", "cloudwatch:TagResource",
+    ]
+    resources = [
+      "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-dev*",
+      "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-pr-*",
+    ]
+  }
+  # CloudFront has no per-distribution ARN scoping until the distribution
+  # exists (CreateDistribution requires resource "*" — an AWS API
+  # constraint, not a policy choice). The action list is the actual scoping
+  # control here: it can create/manage a distribution, nothing else.
+  statement {
+    sid    = "ManageCloudFrontDistributions"
+    effect = "Allow"
+    actions = [
+      "cloudfront:CreateDistribution", "cloudfront:GetDistribution", "cloudfront:UpdateDistribution",
+      "cloudfront:DeleteDistribution", "cloudfront:ListDistributions", "cloudfront:TagResource",
+      "cloudfront:ListTagsForResource", "cloudfront:CreateInvalidation",
+    ]
+    resources = ["*"]
   }
   statement {
     sid     = "PassAndManageLambdaExecRole"
@@ -215,24 +286,43 @@ resource "aws_iam_role" "deploy_prod" {
 }
 
 data "aws_iam_policy_document" "deploy_prod_perms" {
+  # Same shape as deploy-dev's perms — see its comments for why the
+  # scopable and unscopable services are split across statements instead of
+  # sharing one action list with a "*" resource.
   statement {
-    sid    = "WriteProdResources"
+    sid    = "WriteProdNamedResources"
     effect = "Allow"
     actions = [
       "lambda:*",
       "dynamodb:*",
-      "cloudfront:*",
       "ecr:*",
       "logs:*",
-      "cloudwatch:*",
     ]
     resources = [
       "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-prod*",
       "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-prod*",
       "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.svc_name_prefix}",
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-prod*",
-      "*", # see deploy-dev's note — CloudFront/CloudWatch alarms tightened in session 2
     ]
+  }
+  statement {
+    sid    = "ManageProdAlarms"
+    effect = "Allow"
+    actions = [
+      "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
+      "cloudwatch:DescribeAlarms", "cloudwatch:SetAlarmState", "cloudwatch:TagResource",
+    ]
+    resources = ["arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-prod*"]
+  }
+  statement {
+    sid    = "ManageCloudFrontDistributions"
+    effect = "Allow"
+    actions = [
+      "cloudfront:CreateDistribution", "cloudfront:GetDistribution", "cloudfront:UpdateDistribution",
+      "cloudfront:DeleteDistribution", "cloudfront:ListDistributions", "cloudfront:TagResource",
+      "cloudfront:ListTagsForResource", "cloudfront:CreateInvalidation",
+    ]
+    resources = ["*"]
   }
   statement {
     sid       = "PassAndManageLambdaExecRole"
