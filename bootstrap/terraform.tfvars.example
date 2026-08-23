@@ -1,0 +1,4 @@
+gh_org = "poc"
+# gh_paved_road_repo = "paved-road"   # defaults shown, override only if repo names differ
+# gh_service_repo    = "hello-world-svc"
+# aws_region         = "us-east-1"

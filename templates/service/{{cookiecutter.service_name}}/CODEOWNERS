@@ -1,0 +1,6 @@
+# .github/, infra/, and policies referenced from here require platform-team
+# review — even a change to the guard configuration goes through someone who
+# owns that surface (DECISIONS.md §6, PRD §6.5). Swap the placeholder team
+# for the real one before this repo goes live.
+/.github/            @{{cookiecutter.gh_org}}/platform-team
+/infra/              @{{cookiecutter.gh_org}}/platform-team

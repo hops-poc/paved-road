@@ -1,0 +1,4 @@
+# Usage assumptions for cost estimation (PRD §9.8) — wired to the Infracost
+# CI step in session 3. Placeholder until real traffic assumptions exist.
+version: 0.1
+resource_usage: {}
