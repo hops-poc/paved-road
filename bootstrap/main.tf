@@ -1,5 +1,5 @@
 terraform {
-  required_version = "= 1.5.7" # last MPL release before the BSL switch — DECISIONS.md notes the cut
+  required_version = ">= 1.8.0" # OpenTofu (MPL fork); replaces Terraform 1.5.7 — DECISIONS.md notes the BSL cut
 
   required_providers {
     aws = {
