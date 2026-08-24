@@ -9,7 +9,7 @@ and `AI-GOVERNANCE.md` land here at the repo root once they're out of draft.
 
 **Session 1:** scaffold and bootstrap authored, verified locally.
 **Session 2:** both repos pushed to `github.com/hops-poc`.
-**Session 3:** bootstrap applied to AWS — IAM roles and state backend live (account `281832122084`, `eu-central-1`).
+**Session 3:** bootstrap applied to AWS — IAM roles and state backend live (account `281832122084`, `us-east-1`).
 
 - `bootstrap/` — GitHub OIDC provider, the four per-purpose IAM roles (`plan-readonly`,
   `deploy-dev`, `deploy-prod`, `agents-inference`), and the shared Terraform state backend
