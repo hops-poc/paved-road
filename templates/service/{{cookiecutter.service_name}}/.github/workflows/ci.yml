@@ -11,7 +11,9 @@ on:
 permissions:
   id-token: write   # must be granted at this (caller) level too — permissions
   contents: read      # intersect between caller and callee; a called job's own
-                        # id-token: write is silently dropped without this.
+  actions: read        # id-token/actions:read is silently dropped (or, for
+                         # actions:read, hard-rejected at parse time) without this
+                         # — conftest-terraform needs it for actions/download-artifact.
 
 jobs:
   gates:
