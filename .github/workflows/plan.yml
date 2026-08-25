@@ -59,7 +59,8 @@ jobs:
           sha256sum --ignore-missing -c "trivy_${VERSION}_checksums.txt"
           tar -xzf "trivy_${VERSION}_Linux-64bit.tar.gz" trivy
           chmod +x trivy
-      - run: ./trivy image --severity CRITICAL --exit-code 1 ci-local:$GITHUB_SHA
+      - name: Scan (--ignorefile explicit, not relying on undocumented auto-detection)
+        run: ./trivy image --severity CRITICAL --exit-code 1 --ignorefile .trivyignore ci-local:$GITHUB_SHA
 
   tofu-validate:
     runs-on: ubuntu-latest
