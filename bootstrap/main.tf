@@ -27,6 +27,12 @@ provider "aws" {
 }
 
 locals {
-  gh_owner_repo       = "${var.gh_org}/${var.gh_service_repo}"
+  # Used only in job_workflow_ref conditions — that claim is unaffected by
+  # immutable subject claims, stays name-based regardless.
   gh_owner_paved_road = "${var.gh_org}/${var.gh_paved_road_repo}"
+
+  # Used in sub conditions — hello-world-svc was created after GitHub's
+  # 2026-07-15 immutable-subject-claims cutover, so sub is
+  # repo:org@org_id/repo@repo_id, not repo:org/repo (see variables.tf).
+  gh_owner_repo = "${var.gh_org}@${var.gh_org_id}/${var.gh_service_repo}@${var.gh_service_repo_id}"
 }
