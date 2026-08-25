@@ -184,6 +184,20 @@ data "aws_iam_policy_document" "plan_readonly_perms" {
     ]
     resources = ["*"] # plan is read-only; a *:Get/List/Describe policy has no mutation blast radius
   }
+
+  # tofu plan still acquires the state lock (not just apply) — found live:
+  # plan-readonly could assume the role fine but AccessDenied'd on
+  # dynamodb:GetItem/PutItem against the lock table, because this role was
+  # scoped assuming "read-only" meant "no lock-table access needed." Same
+  # lock actions deploy-dev/deploy-prod already have, scoped to the lock
+  # table only — the S3 state object read above stays on the wildcard
+  # Get/List statement since it's genuinely read-only.
+  statement {
+    sid       = "StateLock"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    resources = [aws_dynamodb_table.tfstate_lock.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "plan_readonly" {
