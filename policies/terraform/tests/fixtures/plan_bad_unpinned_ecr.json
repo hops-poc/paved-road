@@ -1,0 +1,39 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "variables": {},
+  "resource_changes": [
+    {
+      "address": "aws_ecr_repository.hello_world_svc",
+      "mode": "managed",
+      "type": "aws_ecr_repository",
+      "name": "hello_world_svc",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "hello-world-svc",
+          "image_tag_mutability": "MUTABLE"
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_function.this",
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "function_name": "hello-world-svc-dev",
+          "package_type": "Image",
+          "image_uri": "281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc:latest",
+          "tags": { "env": "dev" }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,238 @@
+# Reusable workflow: blocking + reporting gates run on every service PR.
+# Called by hello-world-svc's ci.yml via workflow_call. Job ids below are
+# stable identifiers — they become required-status-check names — and this
+# file's path (paved-road/.github/workflows/plan.yml) is what
+# bootstrap/iam.tf's paved-road-plan-readonly trust policy matches against
+# via job_workflow_ref. Don't rename the file or the tofu-plan job without
+# updating that trust policy.
+name: plan
+
+on:
+  workflow_call:
+    secrets:
+      INFRACOST_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.2.4
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun test
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install gitleaks (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=8.30.1
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "gitleaks_${VERSION}_checksums.txt"
+          tar -xzf "gitleaks_${VERSION}_linux_x64.tar.gz" gitleaks
+          chmod +x gitleaks
+      - run: ./gitleaks detect --source . --no-git=false --exit-code 1
+
+  container-build-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build image (no push — FROM is digest-pinned, this is CI-local only)
+        run: docker buildx build --load -t ci-local:$GITHUB_SHA .
+      - name: Install Trivy (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=0.74.0
+          curl -sSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz"
+          curl -sSLO "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "trivy_${VERSION}_checksums.txt"
+          tar -xzf "trivy_${VERSION}_Linux-64bit.tar.gz" trivy
+          chmod +x trivy
+      - run: ./trivy image --severity CRITICAL --exit-code 1 ci-local:$GITHUB_SHA
+
+  tofu-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.12.6"
+      - run: |
+          cd infra/dev
+          tofu init -backend=false
+          tofu validate
+
+  # --- credentialed + fork-gated ---------------------------------------
+  # A fork PR's OIDC `sub` claim is identical to a same-repo PR's — the IAM
+  # trust policy alone can't tell them apart. This condition is the only
+  # thing that stops a fork PR from requesting id-token: write and trying
+  # to assume paved-road-plan-readonly.
+  tofu-plan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-plan-readonly
+          aws-region: us-east-1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.12.6"
+      - run: |
+          cd infra/dev
+          tofu init
+          tofu plan -out=plan.out
+          tofu show -json plan.out > plan.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: plan-json
+          path: infra/dev/plan.json
+
+  conftest-terraform:
+    needs: tofu-plan
+    # Combines the same fork-gate with the upstream job's outcome: on a fork
+    # PR, tofu-plan is skipped (not failed), so needs.tofu-plan.result would
+    # be 'skipped' and this job must skip too rather than run conftest
+    # against a plan.json that was never produced.
+    if: |
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      needs.tofu-plan.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # required by actions/download-artifact
+    steps:
+      # policies/ lives in paved-road, not in the calling repo (hello-world-svc)
+      # — check out this reusable workflow's own repo/ref via the `job`
+      # context, not the default checkout (which would fetch the caller).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: plan-json
+      - name: Install conftest (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=0.69.0
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/conftest_${VERSION}_Linux_x86_64.tar.gz"
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/checksums.txt"
+          sha256sum --ignore-missing -c checksums.txt
+          tar -xzf "conftest_${VERSION}_Linux_x86_64.tar.gz" conftest
+          chmod +x conftest
+      - run: ./conftest test plan.json -p policies/terraform --all-namespaces
+
+  conftest-dockerfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 # caller repo's Dockerfile
+      - name: Checkout paved-road (policies/ source)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: policies-src
+      - name: Install conftest (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=0.69.0
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/conftest_${VERSION}_Linux_x86_64.tar.gz"
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/checksums.txt"
+          sha256sum --ignore-missing -c checksums.txt
+          tar -xzf "conftest_${VERSION}_Linux_x86_64.tar.gz" conftest
+          chmod +x conftest
+      - run: ./conftest test Dockerfile --parser dockerfile -p policies-src/policies/dockerfile
+
+  workflow-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 # caller repo's ci.yml, the file under test
+      - name: Checkout paved-road (policies/ source)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: policies-src
+      - name: Install conftest (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=0.69.0
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/conftest_${VERSION}_Linux_x86_64.tar.gz"
+          curl -sSLO "https://github.com/open-policy-agent/conftest/releases/download/v${VERSION}/checksums.txt"
+          sha256sum --ignore-missing -c checksums.txt
+          tar -xzf "conftest_${VERSION}_Linux_x86_64.tar.gz" conftest
+          chmod +x conftest
+      - run: ./conftest test .github/workflows/ci.yml --parser yaml -p policies-src/policies/workflows
+
+  # --- reporting only — coverage/cost/licenses never block the gate ------
+  sbom-license-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install syft (pinned release binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          VERSION=1.51.0
+          curl -sSLO "https://github.com/anchore/syft/releases/download/v${VERSION}/syft_${VERSION}_linux_amd64.tar.gz"
+          curl -sSLO "https://github.com/anchore/syft/releases/download/v${VERSION}/syft_${VERSION}_checksums.txt"
+          sha256sum --ignore-missing -c "syft_${VERSION}_checksums.txt"
+          tar -xzf "syft_${VERSION}_linux_amd64.tar.gz" syft
+          chmod +x syft
+      - run: ./syft . -o cyclonedx-json=sbom.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: sbom.json
+
+  coverage-bundle-report:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.2.4
+      - run: bun install --frozen-lockfile
+      - run: bun test --coverage | tee coverage.txt
+      - run: grep -E "All files|% Funcs|% Lines" coverage.txt >> "$GITHUB_STEP_SUMMARY" || true
+
+  infracost-report:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      # job.env (unlike job/step `if:`) can read `secrets` — this is how the
+      # later steps gate on the key's presence without secrets in an `if:`.
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install infracost (pinned release binary, checksum-verified)
+        if: ${{ env.INFRACOST_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          VERSION=0.10.45
+          curl -sSLO "https://github.com/infracost/infracost/releases/download/v${VERSION}/infracost-linux-amd64.tar.gz"
+          curl -sSLO "https://github.com/infracost/infracost/releases/download/v${VERSION}/infracost-linux-amd64.tar.gz.sha256"
+          sha256sum -c infracost-linux-amd64.tar.gz.sha256
+          tar -xzf infracost-linux-amd64.tar.gz
+          chmod +x infracost-linux-amd64
+          mv infracost-linux-amd64 infracost
+      - name: infracost breakdown
+        if: ${{ env.INFRACOST_API_KEY != '' }}
+        run: ./infracost breakdown --path infra/dev --usage-file infracost-usage.yml

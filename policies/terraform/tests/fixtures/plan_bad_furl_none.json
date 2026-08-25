@@ -1,0 +1,23 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "variables": {},
+  "resource_changes": [
+    {
+      "address": "aws_lambda_function_url.this",
+      "mode": "managed",
+      "type": "aws_lambda_function_url",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "function_name": "hello-world-svc-dev",
+          "qualifier": "live",
+          "authorization_type": "NONE"
+        }
+      }
+    }
+  ]
+}

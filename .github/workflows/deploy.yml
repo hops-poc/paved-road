@@ -1,0 +1,92 @@
+# Reusable workflow: dev deploy on merge to main, then prod deploy gated on
+# a human-approved GitHub Environment review. Called by hello-world-svc's
+# ci.yml via workflow_call. This file's path is what bootstrap/iam.tf's
+# paved-road-deploy-dev / paved-road-deploy-prod trust policies match via
+# job_workflow_ref — don't rename it without updating those trust policies.
+name: deploy
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # Preview environment deploy (per-PR `pr-<n>` stacks) is deferred to a
+  # future pass. When it lands: same fork-gate pattern as plan.yml's
+  # tofu-plan (`sub` doesn't distinguish fork PRs), the deploy-dev role
+  # (its trust policy already allows `pull_request` subs for this),
+  # enable_cloudfront=false on the module. Seam documented, not built.
+  deploy-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-deploy-dev
+          aws-region: us-east-1
+      - name: Login to shared ECR repo
+        run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 281832122084.dkr.ecr.us-east-1.amazonaws.com
+      - name: Build and push image, capture digest
+        id: build
+        run: |
+          set -euo pipefail
+          REPO=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc
+          docker buildx build --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
+          DIGEST=$(jq -r '."containerimage.digest"' metadata.json)
+          echo "image_uri=$REPO@$DIGEST" >> "$GITHUB_OUTPUT"
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.12.6"
+      - name: Deploy dev
+        run: |
+          cd infra/dev
+          tofu init
+          tofu apply -auto-approve -var image_uri=${{ steps.build.outputs.image_uri }}
+      - name: Smoke test
+        run: |
+          cd infra/dev
+          curl -sf "$(tofu output -raw url)" > /dev/null
+
+  # environment: prod is what produces the `sub=environment:prod` OIDC
+  # claim — the only sub paved-road-deploy-prod trusts — so this job
+  # literally cannot assume the role until a required reviewer on the
+  # `prod` GitHub Environment approves it.
+  deploy-prod:
+    needs: deploy-dev
+    environment: prod
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-deploy-prod
+          aws-region: us-east-1
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: "1.12.6"
+      - name: Deploy prod (same digest deploy-dev built — never rebuild)
+        run: |
+          cd infra/prod
+          tofu init
+          tofu apply -auto-approve -var image_uri=${{ needs.deploy-dev.outputs.image_uri }}
+      - name: Resolve deploy URL
+        working-directory: infra/prod
+        run: echo "PROD_URL=$(tofu output -raw url)" >> "$GITHUB_ENV"
+      - name: Smoke test
+        run: curl -sf "$PROD_URL" > /dev/null
+      - name: Post-deploy monitor
+        run: |
+          for i in 1 2 3 4 5; do
+            curl -sf "$PROD_URL" > /dev/null && echo "check $i ok" || { echo "check $i FAILED"; exit 1; }
+            sleep 6
+          done

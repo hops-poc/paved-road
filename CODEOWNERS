@@ -1,0 +1,9 @@
+# These paths are the IAM trust anchor (bootstrap/), the reusable pipeline
+# (.github/workflows/), the policy suite that gates every service repo
+# (policies/), and the runtime module every stack sources (modules/) — a
+# change to any of them changes what every service repo trusts, not just
+# this one. Platform-team review required (DECISIONS.md §6, PRD §6.5).
+/.github/workflows/   @hops-poc/platform-team
+/bootstrap/            @hops-poc/platform-team
+/policies/              @hops-poc/platform-team
+/modules/                @hops-poc/platform-team

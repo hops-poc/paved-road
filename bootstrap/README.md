@@ -72,3 +72,9 @@ and don't get this backwards.
 DynamoDB lock table, not S3 native locking: OpenTofu 1.8+ supports S3's
 native `use_lockfile` locking, but DynamoDB is kept for now to avoid
 a state migration mid-bootstrap. Can be dropped later once the bucket exists.
+
+**This local apply is the one structural exception, not a precedent.** Once
+`deploy.yml` exists, routine applies go through its OIDC-scoped roles; local
+apply with a long-lived admin credential is break-glass only, invoked
+explicitly by a human with the reason recorded (hops.ai-demo's
+`CLAUDE.md` hard constraints, `DECISIONS.md` §3).

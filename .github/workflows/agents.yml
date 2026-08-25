@@ -1,0 +1,31 @@
+# Reusable workflow: agent inference. Called by hello-world-svc's ci.yml via
+# workflow_call. This file's path is what bootstrap/iam.tf's
+# paved-road-agents-inference trust policy matches via job_workflow_ref —
+# don't rename it without updating that trust policy. Deliberately a no-op
+# today; ReviewBot/Triage/Release/Incident land here in session 5
+# (CLAUDE.md, PRD §8).
+name: agents
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-narrate:
+    # Same fork-gate as plan.yml's tofu-plan — the OIDC `sub` claim for a
+    # pull_request-triggered run doesn't distinguish a fork PR from a
+    # same-repo one, so id-token: write must be withheld from fork PRs here,
+    # not just left to the IAM trust condition.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-agents-inference
+          aws-region: us-east-1
+      - run: echo "agent narration placeholder — session 5 (ReviewBot/Triage/Release/Incident land here)"

@@ -1,0 +1,95 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "variables": {
+    "destroy_ack": { "value": false },
+    "authorizer_exception": { "value": false }
+  },
+  "resource_changes": [
+    {
+      "address": "aws_dynamodb_table.this",
+      "mode": "managed",
+      "type": "aws_dynamodb_table",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "hello-world-svc-dev",
+          "billing_mode": "PAY_PER_REQUEST",
+          "hash_key": "pk",
+          "tags": { "env": "dev" }
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_function.this",
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "function_name": "hello-world-svc-dev",
+          "package_type": "Image",
+          "image_uri": "281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:1111111111111111111111111111111111111111111111111111111111111",
+          "architectures": ["arm64"],
+          "memory_size": 512,
+          "timeout": 15,
+          "tags": { "env": "dev" }
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_alias.live",
+      "mode": "managed",
+      "type": "aws_lambda_alias",
+      "name": "live",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "live",
+          "function_name": "hello-world-svc-dev"
+        }
+      }
+    },
+    {
+      "address": "aws_lambda_function_url.this",
+      "mode": "managed",
+      "type": "aws_lambda_function_url",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "function_name": "hello-world-svc-dev",
+          "qualifier": "live",
+          "authorization_type": "AWS_IAM"
+        }
+      }
+    },
+    {
+      "address": "aws_cloudfront_distribution.this[0]",
+      "mode": "managed",
+      "type": "aws_cloudfront_distribution",
+      "name": "this",
+      "index": 0,
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "enabled": true,
+          "price_class": "PriceClass_100",
+          "tags": { "env": "dev" }
+        }
+      }
+    }
+  ]
+}

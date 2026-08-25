@@ -1,0 +1,12 @@
+# Dockerfile.good with exactly one thing broken: runs as root (scenario 5).
+FROM oven/bun:1.2.4-slim@sha256:c377a08d0711e47c23a8ad8cf9a924cf9abeae4c9031dfa56be2f1786e0f8ce7 AS base
+WORKDIR /app
+
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile --production
+
+COPY src ./src
+
+USER root
+EXPOSE 3000
+ENTRYPOINT ["bun", "run", "src/server.ts"]

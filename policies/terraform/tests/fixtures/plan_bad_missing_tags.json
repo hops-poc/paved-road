@@ -1,0 +1,40 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.8.5",
+  "variables": {},
+  "resource_changes": [
+    {
+      "address": "aws_lambda_function.this",
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "this",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "function_name": "hello-world-svc-dev",
+          "package_type": "Image",
+          "image_uri": "281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:2222222222222222222222222222222222222222222222222222222222222",
+          "tags": {}
+        }
+      }
+    },
+    {
+      "address": "aws_dynamodb_table.preview",
+      "mode": "managed",
+      "type": "aws_dynamodb_table",
+      "name": "preview",
+      "provider_name": "registry.opentofu.org/hashicorp/aws",
+      "change": {
+        "actions": ["create"],
+        "before": null,
+        "after": {
+          "name": "hello-world-svc-pr-42",
+          "billing_mode": "PAY_PER_REQUEST",
+          "tags": { "env": "preview" }
+        }
+      }
+    }
+  ]
+}
