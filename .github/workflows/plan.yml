@@ -80,11 +80,14 @@ jobs:
 
   # --- credentialed + fork-gated ---------------------------------------
   # A fork PR's OIDC `sub` claim is identical to a same-repo PR's — the IAM
-  # trust policy alone can't tell them apart. This condition is the only
-  # thing that stops a fork PR from requesting id-token: write and trying
-  # to assume paved-road-plan-readonly.
+  # trust policy alone can't tell them apart. plan-readonly's trust policy
+  # only allows a `pull_request` sub (PRD §6.1: "plan-only role for
+  # same-repo PR") — found live: running this on `push` too got a real
+  # AssumeRoleWithWebIdentity AccessDenied, because a push's sub is
+  # `ref:refs/heads/main`, which plan-readonly was never meant to trust.
+  # Explicit pull_request-only, not just "not this fork."
   tofu-plan:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -116,7 +119,7 @@ jobs:
     # be 'skipped' and this job must skip too rather than run conftest
     # against a plan.json that was never produced.
     if: |
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
       needs.tofu-plan.result == 'success'
     runs-on: ubuntu-latest
     permissions:
