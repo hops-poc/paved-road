@@ -12,6 +12,14 @@ RUN bun install --frozen-lockfile --production
 
 COPY src ./src
 
+# Lambda Web Adapter (arm64): an external extension that bridges the Lambda
+# Function URL to the HTTP server the ENTRYPOINT starts — so the same image
+# runs on Lambda and locally unchanged (the extension is inert outside the
+# Lambda runtime). Digest-pinned like the base (scenario 2); arm64 manifest,
+# matching the Lambda architecture.
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1@sha256:cd0ad9539cbf223feb1cabd8f4deb7064b6270f185614274b940a36590cdc8f9 /lambda-adapter /opt/extensions/lambda-adapter
+ENV AWS_LWA_PORT=3000
+
 # Runs as the image's built-in non-root `bun` user — never root in the
 # shipped artifact (scenario 5).
 USER bun
