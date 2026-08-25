@@ -33,6 +33,17 @@ jobs:
           aws-region: us-east-1
       - name: Login to shared ECR repo
         run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 281832122084.dkr.ecr.us-east-1.amazonaws.com
+      # modules/service's Lambda is architectures=["arm64"], but this runner
+      # is amd64 — found live: a build with no --platform flag defaulted to
+      # amd64 and deployed fine (no error), but the Lambda then failed every
+      # invocation with Runtime.InvalidEntrypoint (an amd64 image on an
+      # arm64 function). QEMU + the docker-container buildx driver are what
+      # make cross-platform --platform linux/arm64 actually work here;
+      # neither is present on GitHub-hosted runners by default.
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: Build and push image, capture digest
         id: build
         # ECR's repo is image_tag_mutability=IMMUTABLE (ecr_image_pinning
@@ -48,7 +59,7 @@ jobs:
             DIGEST=$(jq -r '.imageDetails[0].imageDigest' existing.json)
             echo "Tag $GITHUB_SHA already pushed (digest $DIGEST) — reusing, not rebuilding."
           else
-            docker buildx build --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
+            docker buildx build --platform linux/arm64 --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
             DIGEST=$(jq -r '."containerimage.digest"' metadata.json)
           fi
           echo "image_uri=$REPO@$DIGEST" >> "$GITHUB_OUTPUT"
