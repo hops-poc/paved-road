@@ -269,6 +269,10 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
   # exists (CreateDistribution requires resource "*" — an AWS API
   # constraint, not a policy choice). The action list is the actual scoping
   # control here: it can create/manage a distribution, nothing else.
+  # OriginAccessControl actions were missing outright (not just unscopable)
+  # — found live: aws_cloudfront_origin_access_control's refresh AccessDenied
+  # on GetOriginAccessControl, an omission from the original design, not an
+  # AWS scoping constraint like the distribution actions above.
   statement {
     sid    = "ManageCloudFrontDistributions"
     effect = "Allow"
@@ -276,13 +280,32 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "cloudfront:CreateDistribution", "cloudfront:GetDistribution", "cloudfront:UpdateDistribution",
       "cloudfront:DeleteDistribution", "cloudfront:ListDistributions", "cloudfront:TagResource",
       "cloudfront:ListTagsForResource", "cloudfront:CreateInvalidation",
+      "cloudfront:CreateOriginAccessControl", "cloudfront:GetOriginAccessControl",
+      "cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl",
     ]
     resources = ["*"]
   }
+  # logs:DescribeLogGroups is a list/search action — AWS requires it use the
+  # fixed pseudo-resource arn:...:log-group::log-stream: (visible verbatim
+  # in the AccessDenied error), not a real log-group ARN, so it can't live
+  # in the log-group-scoped logs:* statement above. Same constraint class as
+  # ecr:GetAuthorizationToken/CloudFront CreateDistribution.
   statement {
-    sid     = "PassAndManageLambdaExecRole"
-    effect  = "Allow"
-    actions = ["iam:CreateRole", "iam:DeleteRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PassRole", "iam:GetRole", "iam:TagRole"]
+    sid       = "LogsDescribe"
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+  statement {
+    sid    = "PassAndManageLambdaExecRole"
+    effect = "Allow"
+    actions = [
+      "iam:CreateRole", "iam:DeleteRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+      "iam:PassRole", "iam:GetRole", "iam:TagRole",
+      # Refresh-phase reads on the inline policy — missing originally, found
+      # live via AccessDenied on ListRolePolicies during tofu apply's refresh.
+      "iam:GetRolePolicy", "iam:ListRolePolicies",
+    ]
     resources = [
       "arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-dev-exec",
       "arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-pr-*-exec",
