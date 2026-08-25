@@ -63,6 +63,10 @@ jobs:
 
   tofu-validate:
     runs-on: ubuntu-latest
+    # No real credentials on purpose — hello-world-svc's provider blocks set
+    # skip_credentials_validation/skip_requesting_account_id so `tofu
+    # validate` runs fully offline (verified locally: without those flags
+    # the aws provider calls live STS even during validate and fails).
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
