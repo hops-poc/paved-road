@@ -97,10 +97,11 @@ jobs:
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
           tofu_version: "1.12.6"
-      - run: |
+      - name: Plan (placeholder image digest — real one only exists after deploy.yml builds it)
+        run: |
           cd infra/dev
           tofu init
-          tofu plan -out=plan.out
+          tofu plan -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
           tofu show -json plan.out > plan.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
