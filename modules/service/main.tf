@@ -67,6 +67,11 @@ resource "aws_dynamodb_table" "this" {
     name = "pk"
     type = "S"
   }
+
+  tags = {
+    env     = var.env
+    Project = "hello-world-svc"
+  }
 }
 
 resource "aws_lambda_function" "this" {
@@ -83,6 +88,11 @@ resource "aws_lambda_function" "this" {
     variables = {
       TABLE_NAME = aws_dynamodb_table.this.name
     }
+  }
+
+  tags = {
+    env     = var.env
+    Project = "hello-world-svc"
   }
 
   depends_on = [aws_cloudwatch_log_group.lambda]
@@ -184,5 +194,10 @@ resource "aws_cloudfront_distribution" "this" {
 
   viewer_certificate {
     cloudfront_default_certificate = true # *.cloudfront.net HTTPS, free
+  }
+
+  tags = {
+    env     = var.env
+    Project = "hello-world-svc"
   }
 }
