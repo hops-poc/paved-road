@@ -1,7 +1,6 @@
-# Session-1 skeleton: lint + typecheck + test, green, nothing else. Rewired
-# in session 3 to call paved-road's reusable service.yml@v1 (full gate set,
-# preview deploy, promotion) — CLAUDE.md/PRD §15. Don't add cloud steps here
-# before that lands; this file's only job right now is "CI is green."
+# Session 3: calls paved-road's reusable gate/deploy/agents workflows
+# instead of containing pipeline logic here — that's the paved road. Pin
+# bumps to a new paved-road SHA go through a normal PR like any other change.
 name: ci
 
 on:
@@ -9,15 +8,22 @@ on:
   push:
     branches: [main]
 
+permissions:
+  id-token: write   # must be granted at this (caller) level too — permissions
+  contents: read      # intersect between caller and callee; a called job's own
+                        # id-token: write is silently dropped without this.
+
 jobs:
-  lint-typecheck-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
-        with:
-          bun-version: 1.2.4
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun test
+  gates:
+    uses: hops-poc/paved-road/.github/workflows/plan.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
+    secrets: inherit
+
+  agents-narrate:
+    needs: gates
+    if: always()
+    uses: hops-poc/paved-road/.github/workflows/agents.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
+
+  deploy:
+    needs: gates
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: hops-poc/paved-road/.github/workflows/deploy.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
