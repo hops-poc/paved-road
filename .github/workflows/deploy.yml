@@ -35,11 +35,22 @@ jobs:
         run: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 281832122084.dkr.ecr.us-east-1.amazonaws.com
       - name: Build and push image, capture digest
         id: build
+        # ECR's repo is image_tag_mutability=IMMUTABLE (ecr_image_pinning
+        # policy) — a re-run of this job for the same commit (tofu apply
+        # failing after a successful push, then a retry) would otherwise
+        # fail re-pushing the same $GITHUB_SHA tag. Found live. Reuse the
+        # existing digest instead of re-pushing when the tag already exists.
         run: |
           set -euo pipefail
-          REPO=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc
-          docker buildx build --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
-          DIGEST=$(jq -r '."containerimage.digest"' metadata.json)
+          REPO_NAME=hello-world-svc
+          REPO=281832122084.dkr.ecr.us-east-1.amazonaws.com/$REPO_NAME
+          if aws ecr describe-images --repository-name "$REPO_NAME" --image-ids imageTag=$GITHUB_SHA --region us-east-1 >existing.json 2>/dev/null; then
+            DIGEST=$(jq -r '.imageDetails[0].imageDigest' existing.json)
+            echo "Tag $GITHUB_SHA already pushed (digest $DIGEST) — reusing, not rebuilding."
+          else
+            docker buildx build --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
+            DIGEST=$(jq -r '."containerimage.digest"' metadata.json)
+          fi
           echo "image_uri=$REPO@$DIGEST" >> "$GITHUB_OUTPUT"
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
