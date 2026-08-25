@@ -304,7 +304,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "iam:PassRole", "iam:GetRole", "iam:TagRole",
       # Refresh-phase reads on the inline policy — missing originally, found
       # live via AccessDenied on ListRolePolicies during tofu apply's refresh.
-      "iam:GetRolePolicy", "iam:ListRolePolicies",
+      "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
     ]
     resources = [
       "arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-dev-exec",
