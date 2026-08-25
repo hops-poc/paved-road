@@ -59,7 +59,14 @@ jobs:
             DIGEST=$(jq -r '.imageDetails[0].imageDigest' existing.json)
             echo "Tag $GITHUB_SHA already pushed (digest $DIGEST) — reusing, not rebuilding."
           else
-            docker buildx build --platform linux/arm64 --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
+            # --provenance=false: buildx adds a minimal provenance attestation
+            # by default (documented default since buildx 0.10+), which turns
+            # a single-platform push into a multi-manifest OCI index. Lambda's
+            # UpdateFunctionCode rejects that outright — found live:
+            # "InvalidParameterValueException: image manifest, config or
+            # layer media type ... is not supported." Lambda wants one plain
+            # image manifest.
+            docker buildx build --platform linux/arm64 --provenance=false --sbom=false --push -t "$REPO:$GITHUB_SHA" --metadata-file metadata.json .
             DIGEST=$(jq -r '."containerimage.digest"' metadata.json)
           fi
           echo "image_uri=$REPO@$DIGEST" >> "$GITHUB_OUTPUT"
