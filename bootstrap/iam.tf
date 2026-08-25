@@ -253,6 +253,18 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-pr-*",
     ]
   }
+  # ecr:GetAuthorizationToken is an account/region-level action (the docker
+  # login token isn't per-repository) — AWS requires Resource "*" for it,
+  # the same class of constraint as CreateDistribution below. Putting it in
+  # the repository-scoped ecr:* statement above silently grants nothing —
+  # found live: deploy-dev's first real run got AccessDenied on it, `docker
+  # login` never even reached the repository-scoped actions.
+  statement {
+    sid       = "EcrAuthToken"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
   # CloudFront has no per-distribution ARN scoping until the distribution
   # exists (CreateDistribution requires resource "*" — an AWS API
   # constraint, not a policy choice). The action list is the actual scoping
