@@ -70,9 +70,14 @@ jobs:
           # its still-running jobs). Fetching the specific failed job's own
           # log by ID has no such dependency on overall run status.
           if [ -n "$JOB_ID" ]; then
-            LOG=$(gh run view "${{ github.run_id }}" --job "$JOB_ID" --log 2>/dev/null | tail -c 4000 || echo "log unavailable")
+            LOG=$(gh run view "${{ github.run_id }}" --job "$JOB_ID" --log 2>gh_log_err.txt | tail -c 4000) || true
+            if [ -z "$LOG" ]; then
+              ERR=$(cat gh_log_err.txt)
+              echo "::warning::gh run view --log returned nothing for job $JOB_ID: $ERR"
+              LOG="log unavailable ($ERR)"
+            fi
           else
-            LOG="log unavailable"
+            LOG="log unavailable (no failed job id found)"
           fi
           # Random delimiter, not a fixed string: this log is raw build/test
           # output from the PR's own code, so a fixed delimiter risks the
