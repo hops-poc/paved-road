@@ -87,3 +87,11 @@ still has no CI apply route of its own.
   `WriteLedgerOnly` statement already scoped a `PutItem` grant to, so
   ReviewBot/Triage have somewhere to write ledger rows (PRD §8 Tier 1).
   1 resource added, 0 changed, 0 destroyed.
+- Session 5: `agents_inference_perms`'s `InvokeAllowlistedModelOnly`
+  statement widened to the cross-region inference-profile ARN plus its
+  three underlying regional foundation-model ARNs — found live, a real
+  Triage-narration test run failed with `ValidationException: ... with
+  on-demand throughput isn't supported`. `bedrock_model_id` also flipped
+  from the bare foundation-model ID to the inference-profile ID
+  (`us.anthropic.claude-haiku-4-5-20251001-v1:0`). 0 added, 1 changed, 0
+  destroyed.

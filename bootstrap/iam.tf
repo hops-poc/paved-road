@@ -414,11 +414,23 @@ resource "aws_iam_role" "agents_inference" {
 }
 
 data "aws_iam_policy_document" "agents_inference_perms" {
+  # var.bedrock_model_id is a cross-region inference-profile ID (e.g.
+  # us.anthropic.claude-haiku-4-5-20251001-v1:0) — found live: invoking the
+  # bare foundation-model ID gets "ValidationException: ... with on-demand
+  # throughput isn't supported. Retry ... with the ID or ARN of an inference
+  # profile." Bedrock still checks permission on the underlying per-region
+  # foundation-model ARNs the profile can route to, not just the profile
+  # ARN itself — both are required or InvokeModel is denied downstream.
   statement {
-    sid       = "InvokeAllowlistedModelOnly"
-    effect    = "Allow"
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = ["arn:aws:bedrock:${local.region}::foundation-model/${var.bedrock_model_id}"]
+    sid     = "InvokeAllowlistedModelOnly"
+    effect  = "Allow"
+    actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = concat(
+      ["arn:aws:bedrock:${local.region}:${local.account_id}:inference-profile/${var.bedrock_model_id}"],
+      [for r in ["us-east-1", "us-east-2", "us-west-2"] :
+        "arn:aws:bedrock:${r}::foundation-model/${trimprefix(var.bedrock_model_id, "us.")}"
+      ]
+    )
   }
   statement {
     sid       = "WriteLedgerOnly"

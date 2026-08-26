@@ -45,7 +45,7 @@ variable "aws_region" {
 }
 
 variable "bedrock_model_id" {
-  description = "Allow-listed small Claude model for agents-inference (PRD §8.1 — small model, ~$2-4 total)"
+  description = "Allow-listed small Claude model for agents-inference (PRD §8.1 — small model, ~$2-4 total). Cross-region inference-profile ID, not the bare foundation-model ID — this model has no on-demand throughput without one (verified live via aws bedrock list-inference-profiles)."
   type        = string
-  default     = "anthropic.claude-haiku-4-5-20251001-v1:0"
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 }

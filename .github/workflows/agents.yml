@@ -51,8 +51,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          NAME=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
-            --jq '[.jobs[] | select(.conclusion=="failure") | .name] | .[0] // "unknown"')
+          FAILED=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
+            --jq '[.jobs[] | select(.conclusion=="failure")] | .[0] // {}')
+          NAME=$(echo "$FAILED" | jq -r '.name // "unknown"')
+          JOB_ID=$(echo "$FAILED" | jq -r '.id // empty')
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
           # ReviewBot explains a named policy violation (conftest/OPA);
@@ -62,7 +64,16 @@ jobs:
             *)                                echo "agent=Triage" >> "$GITHUB_OUTPUT" ;;
           esac
 
-          LOG=$(gh run view "${{ github.run_id }}" --log-failed 2>/dev/null | tail -c 4000 || echo "log unavailable")
+          # `gh run view --log-failed` needs the *whole run* completed, not
+          # just this job — found live: it silently returned nothing while
+          # this run was still in progress (agent-narrate itself was one of
+          # its still-running jobs). Fetching the specific failed job's own
+          # log by ID has no such dependency on overall run status.
+          if [ -n "$JOB_ID" ]; then
+            LOG=$(gh run view "${{ github.run_id }}" --job "$JOB_ID" --log 2>/dev/null | tail -c 4000 || echo "log unavailable")
+          else
+            LOG="log unavailable"
+          fi
           {
             echo 'log<<GATELOG_EOF'
             echo "$LOG"
@@ -95,7 +106,7 @@ jobs:
           BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:300,messages:[{role:"user",content:$p}]}')
 
           aws bedrock-runtime invoke-model \
-            --model-id anthropic.claude-haiku-4-5-20251001-v1:0 \
+            --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \
             --body "$BODY" \
             --cli-binary-format raw-in-base64-out \
             response.json
@@ -142,7 +153,7 @@ jobs:
             --arg agent "${{ steps.fail.outputs.agent }}" \
             --arg ts "$TS" \
             --arg trigger "${{ steps.fail.outputs.name }}" \
-            --arg model "anthropic.claude-haiku-4-5-20251001-v1:0" \
+            --arg model "us.anthropic.claude-haiku-4-5-20251001-v1:0" \
             --arg hash "$PROMPT_HASH" \
             --arg out_ref "run:${{ github.run_id }}" \
             --arg tin "$TOKENS_IN" --arg tout "$TOKENS_OUT" --arg cost "$COST" \
