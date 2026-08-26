@@ -1,13 +1,24 @@
 # Reusable workflow: agent inference. Called by hello-world-svc's ci.yml via
 # workflow_call. This file's path is what bootstrap/iam.tf's
 # paved-road-agents-inference trust policy matches via job_workflow_ref —
-# don't rename it without updating that trust policy. Deliberately a no-op
-# today; ReviewBot/Triage/Release/Incident land here in session 5
-# (CLAUDE.md, PRD §8).
+# don't rename it without updating that trust policy.
+#
+# ReviewBot + Triage only (session 5, PRD §14 Tier 1: "ReviewBot + Triage on
+# Bedrock; agent ledger"). Release and Incident stay documented design only
+# in AI-GOVERNANCE.md — Release's job is already satisfied by the human
+# GitHub Environment approval that runs end-to-end without an agent, and
+# Incident would be bolted onto RUNBOOK.md's already-recorded manual alias
+# flip. narrate-dev/narrate-prod in deploy.yml stay placeholders for the
+# same reason.
 name: agents
 
 on:
   workflow_call:
+    inputs:
+      gates_result:
+        description: "needs.gates.result from the calling workflow — this job has no direct needs: on gates itself"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,14 +29,126 @@ jobs:
     # pull_request-triggered run doesn't distinguish a fork PR from a
     # same-repo one, so id-token: write must be withheld from fork PRs here,
     # not just left to the IAM trust condition.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && inputs.gates_result != 'success'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
+      actions: read # gh api .../jobs and `gh run view --log-failed`
+      pull-requests: write # ReviewBot/Triage comment on PRs
     steps:
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: arn:aws:iam::281832122084:role/paved-road-agents-inference
           aws-region: us-east-1
-      - run: echo "agent narration placeholder — session 5 (ReviewBot/Triage/Release/Incident land here)"
+
+      # Which gate job actually failed, and its log tail — the calling
+      # workflow's `gates` job is itself a reusable-workflow call, so its
+      # sub-jobs share this run id and show up as "gates / <job>" here.
+      - name: Identify failed gate + log tail
+        id: fail
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NAME=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
+            --jq '[.jobs[] | select(.conclusion=="failure") | .name] | .[0] // "unknown"')
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+          # ReviewBot explains a named policy violation (conftest/OPA);
+          # Triage diagnoses everything else (lint/test/build/scan breaks).
+          case "$NAME" in
+            *conftest*|*workflow-integrity*) echo "agent=ReviewBot" >> "$GITHUB_OUTPUT" ;;
+            *)                                echo "agent=Triage" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          LOG=$(gh run view "${{ github.run_id }}" --log-failed 2>/dev/null | tail -c 4000 || echo "log unavailable")
+          {
+            echo 'log<<GATELOG_EOF'
+            echo "$LOG"
+            echo 'GATELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # AI_ENABLED=false (repo/org variable) degrades to raw structured
+      # output — the pipeline is fully functional with zero Bedrock access
+      # (AI-GOVERNANCE.md §1); Bedrock is never load-bearing for the gate.
+      - name: Explain the failure
+        id: explain
+        env:
+          AI_ENABLED: ${{ vars.AI_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$AI_ENABLED" = "false" ]; then
+            {
+              echo 'text<<EXPLAIN_EOF'
+              echo "AI narration disabled (AI_ENABLED=false) — raw gate output:"
+              echo "${{ steps.fail.outputs.log }}"
+              echo 'EXPLAIN_EOF'
+            } >> "$GITHUB_OUTPUT"
+            echo "tokens_in=0" >> "$GITHUB_OUTPUT"
+            echo "tokens_out=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PROMPT=$(jq -n --arg job "${{ steps.fail.outputs.name }}" --arg log "${{ steps.fail.outputs.log }}" \
+            '"A CI gate job named \($job) failed. In 2-3 plain-language sentences, explain what likely went wrong and, if the log names a policy, why that policy exists. Log tail:\n\($log)"')
+          BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:300,messages:[{role:"user",content:$p}]}')
+
+          aws bedrock-runtime invoke-model \
+            --model-id anthropic.claude-haiku-4-5-20251001-v1:0 \
+            --body "$BODY" \
+            --cli-binary-format raw-in-base64-out \
+            response.json
+
+          {
+            echo 'text<<EXPLAIN_EOF'
+            jq -r '.content[0].text' response.json
+            echo 'EXPLAIN_EOF'
+          } >> "$GITHUB_OUTPUT"
+          echo "tokens_in=$(jq -r '.usage.input_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
+          echo "tokens_out=$(jq -r '.usage.output_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Post narration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🤖 ${{ steps.fail.outputs.agent }} (AI-generated)"
+            echo
+            echo "${{ steps.explain.outputs.text }}"
+          } | tee -a "$GITHUB_STEP_SUMMARY" > comment.md
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" --body-file comment.md
+          fi
+
+      # Append-only audit row (agents-inference's IAM policy grants PutItem
+      # only — no Update/Delete). cost_usd_est uses Bedrock Haiku's public
+      # per-token rate as an approximation; AI-GOVERNANCE.md §4 already
+      # states exact per-call dollars aren't attainable from AWS billing and
+      # treats this as an estimate reconciled monthly against Cost Explorer.
+      - name: Write ledger row
+        if: always()
+        run: |
+          set -euo pipefail
+          TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+          TOKENS_IN="${{ steps.explain.outputs.tokens_in || 0 }}"
+          TOKENS_OUT="${{ steps.explain.outputs.tokens_out || 0 }}"
+          COST=$(awk -v i="$TOKENS_IN" -v o="$TOKENS_OUT" 'BEGIN { printf "%.6f", (i/1000*0.0008) + (o/1000*0.004) }')
+          PROMPT_HASH=$(echo -n "${{ steps.fail.outputs.name }}${{ steps.fail.outputs.log }}" | sha256sum | cut -d' ' -f1)
+
+          aws dynamodb put-item --table-name hello-world-svc-agent-ledger --item "$(jq -n \
+            --arg agent "${{ steps.fail.outputs.agent }}" \
+            --arg ts "$TS" \
+            --arg trigger "${{ steps.fail.outputs.name }}" \
+            --arg model "anthropic.claude-haiku-4-5-20251001-v1:0" \
+            --arg hash "$PROMPT_HASH" \
+            --arg out_ref "run:${{ github.run_id }}" \
+            --arg tin "$TOKENS_IN" --arg tout "$TOKENS_OUT" --arg cost "$COST" \
+            '{
+              agent: {S: $agent}, ts: {S: $ts}, trigger: {S: $trigger}, model: {S: $model},
+              prompt_hash: {S: $hash}, output_ref: {S: $out_ref},
+              tokens_in: {N: $tin}, tokens_out: {N: $tout}, cost_usd_est: {N: $cost},
+              outcome: {S: "ignored"}
+            }')"

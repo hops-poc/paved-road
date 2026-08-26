@@ -80,3 +80,10 @@ explicitly by a human with the reason recorded (hops.ai-demo's
 permissions were narrowed the same way after PR previews were cut (dropped
 the `pull_request` trust arm and all `pr-*`-named resource grants) — `bootstrap/`
 still has no CI apply route of its own.
+
+**Break-glass log:**
+- Session 5: `aws_dynamodb_table.agent_ledger` (`ledger.tf`) — created the
+  `hello-world-svc-agent-ledger` table that `agents_inference`'s
+  `WriteLedgerOnly` statement already scoped a `PutItem` grant to, so
+  ReviewBot/Triage have somewhere to write ledger rows (PRD §8 Tier 1).
+  1 resource added, 0 changed, 0 destroyed.
