@@ -78,10 +78,20 @@ jobs:
           cd infra/dev
           tofu init
           tofu apply -auto-approve -var image_uri=${{ steps.build.outputs.image_uri }}
+      # Mirrors src/server.test.ts's assertions, run against the live dev
+      # URL instead of an in-process server — this is what a human approving
+      # prod is implicitly trusting; a bare 200-on-homepage check doesn't
+      # prove the API actually works.
       - name: Smoke test
         run: |
           cd infra/dev
-          curl -sf "$(tofu output -raw url)" > /dev/null
+          URL="$(tofu output -raw url)"
+          curl -sf "$URL" | grep -q "<title>hello-world-svc</title>" || { echo "homepage: unexpected content"; exit 1; }
+          HELLO=$(curl -sf "$URL/api/hello")
+          echo "$HELLO" | jq -e '.message | contains("hello from")' >/dev/null || { echo "api/hello: unexpected response: $HELLO"; exit 1; }
+          HEALTH=$(curl -sf "$URL/api/healthz")
+          [ "$HEALTH" = "ok" ] || { echo "api/healthz: unexpected response: $HEALTH"; exit 1; }
+          echo "smoke test passed: homepage, /api/hello, /api/healthz"
 
   # environment: prod is what produces the `sub=environment:prod` OIDC
   # claim — the only sub paved-road-deploy-prod trusts — so this job
@@ -112,7 +122,13 @@ jobs:
         working-directory: infra/prod
         run: echo "PROD_URL=$(tofu output -raw url)" >> "$GITHUB_ENV"
       - name: Smoke test
-        run: curl -sf "$PROD_URL" > /dev/null
+        run: |
+          curl -sf "$PROD_URL" | grep -q "<title>hello-world-svc</title>" || { echo "homepage: unexpected content"; exit 1; }
+          HELLO=$(curl -sf "$PROD_URL/api/hello")
+          echo "$HELLO" | jq -e '.message | contains("hello from")' >/dev/null || { echo "api/hello: unexpected response: $HELLO"; exit 1; }
+          HEALTH=$(curl -sf "$PROD_URL/api/healthz")
+          [ "$HEALTH" = "ok" ] || { echo "api/healthz: unexpected response: $HEALTH"; exit 1; }
+          echo "smoke test passed: homepage, /api/hello, /api/healthz"
       - name: Post-deploy monitor
         run: |
           for i in 1 2 3 4 5; do
