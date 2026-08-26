@@ -74,10 +74,15 @@ jobs:
           else
             LOG="log unavailable"
           fi
+          # Random delimiter, not a fixed string: this log is raw build/test
+          # output from the PR's own code, so a fixed delimiter risks the
+          # classic GITHUB_OUTPUT injection if a log line happens to match it
+          # (GitHub's own hardening guidance on multiline outputs).
+          DELIM="GATELOG_$(openssl rand -hex 8)"
           {
-            echo 'log<<GATELOG_EOF'
+            echo "log<<$DELIM"
             echo "$LOG"
-            echo 'GATELOG_EOF'
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
 
       # AI_ENABLED=false (repo/org variable) degrades to raw structured
@@ -87,21 +92,34 @@ jobs:
         id: explain
         env:
           AI_ENABLED: ${{ vars.AI_ENABLED }}
+          # Untrusted content (build/test log output from the PR's own code)
+          # goes through env, never spliced straight into the script via
+          # ${{ }} — GitHub Actions substitutes ${{ }} into the script's raw
+          # text before bash parses it, so shell metacharacters (backticks,
+          # $(), quotes) in the log would execute. Found live: a Bedrock
+          # explanation that merely quoted a job name in backticks triggered
+          # `gates: command not found` — accidental this time, but the same
+          # mechanism is a real injection path for anything log-derived. An
+          # env var's value is set directly by the runner, not re-parsed by
+          # bash, so this is immune regardless of content.
+          FAILED_NAME: ${{ steps.fail.outputs.name }}
+          FAILED_LOG: ${{ steps.fail.outputs.log }}
         run: |
           set -euo pipefail
           if [ "$AI_ENABLED" = "false" ]; then
+            DELIM="EXPLAIN_$(openssl rand -hex 8)"
             {
-              echo 'text<<EXPLAIN_EOF'
+              echo "text<<$DELIM"
               echo "AI narration disabled (AI_ENABLED=false) — raw gate output:"
-              echo "${{ steps.fail.outputs.log }}"
-              echo 'EXPLAIN_EOF'
+              echo "$FAILED_LOG"
+              echo "$DELIM"
             } >> "$GITHUB_OUTPUT"
             echo "tokens_in=0" >> "$GITHUB_OUTPUT"
             echo "tokens_out=0" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          PROMPT=$(jq -n --arg job "${{ steps.fail.outputs.name }}" --arg log "${{ steps.fail.outputs.log }}" \
+          PROMPT=$(jq -n --arg job "$FAILED_NAME" --arg log "$FAILED_LOG" \
             '"A CI gate job named \($job) failed. In 2-3 plain-language sentences, explain what likely went wrong and, if the log names a policy, why that policy exists. Log tail:\n\($log)"')
           BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:300,messages:[{role:"user",content:$p}]}')
 
@@ -111,10 +129,11 @@ jobs:
             --cli-binary-format raw-in-base64-out \
             response.json
 
+          DELIM="EXPLAIN_$(openssl rand -hex 8)"
           {
-            echo 'text<<EXPLAIN_EOF'
+            echo "text<<$DELIM"
             jq -r '.content[0].text' response.json
-            echo 'EXPLAIN_EOF'
+            echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
           echo "tokens_in=$(jq -r '.usage.input_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
           echo "tokens_out=$(jq -r '.usage.output_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
@@ -122,12 +141,14 @@ jobs:
       - name: Post narration
         env:
           GH_TOKEN: ${{ github.token }}
+          AGENT_NAME: ${{ steps.fail.outputs.agent }}
+          EXPLAIN_TEXT: ${{ steps.explain.outputs.text }} # see "Explain the failure" — same injection reasoning
         run: |
           set -euo pipefail
           {
-            echo "### 🤖 ${{ steps.fail.outputs.agent }} (AI-generated)"
+            echo "### 🤖 ${AGENT_NAME} (AI-generated)"
             echo
-            echo "${{ steps.explain.outputs.text }}"
+            echo "$EXPLAIN_TEXT"
           } | tee -a "$GITHUB_STEP_SUMMARY" > comment.md
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -141,18 +162,22 @@ jobs:
       # treats this as an estimate reconciled monthly against Cost Explorer.
       - name: Write ledger row
         if: always()
+        env:
+          AGENT_NAME: ${{ steps.fail.outputs.agent }}
+          FAILED_NAME: ${{ steps.fail.outputs.name }}
+          FAILED_LOG: ${{ steps.fail.outputs.log }} # see "Explain the failure" — same injection reasoning
+          TOKENS_IN: ${{ steps.explain.outputs.tokens_in || 0 }}
+          TOKENS_OUT: ${{ steps.explain.outputs.tokens_out || 0 }}
         run: |
           set -euo pipefail
           TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-          TOKENS_IN="${{ steps.explain.outputs.tokens_in || 0 }}"
-          TOKENS_OUT="${{ steps.explain.outputs.tokens_out || 0 }}"
           COST=$(awk -v i="$TOKENS_IN" -v o="$TOKENS_OUT" 'BEGIN { printf "%.6f", (i/1000*0.0008) + (o/1000*0.004) }')
-          PROMPT_HASH=$(echo -n "${{ steps.fail.outputs.name }}${{ steps.fail.outputs.log }}" | sha256sum | cut -d' ' -f1)
+          PROMPT_HASH=$(printf '%s%s' "$FAILED_NAME" "$FAILED_LOG" | sha256sum | cut -d' ' -f1)
 
           aws dynamodb put-item --table-name hello-world-svc-agent-ledger --item "$(jq -n \
-            --arg agent "${{ steps.fail.outputs.agent }}" \
+            --arg agent "$AGENT_NAME" \
             --arg ts "$TS" \
-            --arg trigger "${{ steps.fail.outputs.name }}" \
+            --arg trigger "$FAILED_NAME" \
             --arg model "us.anthropic.claude-haiku-4-5-20251001-v1:0" \
             --arg hash "$PROMPT_HASH" \
             --arg out_ref "run:${{ github.run_id }}" \
