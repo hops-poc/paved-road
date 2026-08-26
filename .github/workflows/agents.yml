@@ -70,7 +70,11 @@ jobs:
           # its still-running jobs). Fetching the specific failed job's own
           # log by ID has no such dependency on overall run status.
           if [ -n "$JOB_ID" ]; then
-            LOG=$(gh run view "${{ github.run_id }}" --job "$JOB_ID" --log 2>gh_log_err.txt | tail -c 4000) || true
+            # `gh run view` (unlike the `gh api repos/... ` call above) infers
+            # the repo from the local git remote when --repo is omitted —
+            # found live: "failed to determine base repo: not a git
+            # repository", since this job never checks out any code.
+            LOG=$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --job "$JOB_ID" --log 2>gh_log_err.txt | tail -c 4000) || true
             if [ -z "$LOG" ]; then
               ERR=$(cat gh_log_err.txt)
               echo "::warning::gh run view --log returned nothing for job $JOB_ID: $ERR"
