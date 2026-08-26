@@ -102,6 +102,30 @@ jobs:
           [ "$HEALTH" = "ok" ] || { echo "api/healthz: unexpected response: $HEALTH"; exit 1; }
           echo "smoke test passed: homepage, /api/hello, /api/healthz"
 
+  # Fires right after dev's smoke test settles — in parallel with
+  # deploy-prod's approval wait, not after it. deploy-prod can sit pending
+  # human review for arbitrarily long (environment: prod blocks until
+  # approved); if this job needed deploy-prod too, agent narration would be
+  # stuck waiting through that entire pause, unable to tell a human "dev is
+  # up, here's what changed" *before* they decide whether to approve —
+  # exactly backwards for the Release agent's actual job (PRD §6.3). Same
+  # role as agents.yml's placeholder job — job_workflow_ref for a job
+  # inside deploy.yml is deploy.yml's own ref, so agents-inference's trust
+  # policy lists both files, not just agents.yml.
+  narrate-dev:
+    needs: [deploy-dev, smoke-test-dev]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-agents-inference
+          aws-region: us-east-1
+      - run: echo "agent narration placeholder — session 5 — narrate dev result (${{ needs.smoke-test-dev.result }}), present prod promotion for human decision"
+
   # environment: prod is what produces the `sub=environment:prod` OIDC
   # claim — the only sub paved-road-deploy-prod trusts — so this job
   # literally cannot assume the role until a required reviewer on the
@@ -156,3 +180,20 @@ jobs:
             curl -sf "$URL" > /dev/null && echo "check $i ok" || { echo "check $i FAILED"; exit 1; }
             sleep 6
           done
+
+  # Mirrors narrate-dev — fires after prod settles (success or failure),
+  # the checkpoint for Release confirming a live prod / Incident's initial
+  # post-deploy watch trigger.
+  narrate-prod:
+    needs: [deploy-prod, smoke-test-prod]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::281832122084:role/paved-road-agents-inference
+          aws-region: us-east-1
+      - run: echo "agent narration placeholder — session 5 — narrate prod result (${{ needs.smoke-test-prod.result }})"

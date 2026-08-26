@@ -20,16 +20,15 @@ jobs:
     uses: hops-poc/paved-road/.github/workflows/plan.yml@94625e5cd7378751dc6085b73873cdfa5b3c04d0
     secrets: inherit
 
-  # Runs last, after deploy's whole internal chain (deploy-dev → smoke-test-dev
-  # → deploy-prod → smoke-test-prod) has settled — otherwise the agents that
-  # land here later would narrate a deploy that hasn't happened yet. `deploy`
-  # alone would order this correctly (it already needs gates), but listing both
-  # keeps needs.gates.result readable from inside the job: ReviewBot explains a
-  # gate failure on PR runs, where deploy is skipped and carries no signal.
-  # if: always() — deploy is skipped on PRs and may fail on main; skipped and
-  # failed both count as completed deps, so this job still runs in every case.
+  # ReviewBot's checkpoint only — explains a gate failure, PR or push, and
+  # doesn't wait on deploy (which is skipped on PRs anyway, and can sit
+  # pending prod approval for arbitrarily long on push:main). Dev/prod
+  # deploy narration moved inside deploy.yml itself (narrate-dev/
+  # narrate-prod), positioned at the actual points in that job DAG where
+  # something worth narrating has happened — this job would otherwise be
+  # stuck waiting through deploy-prod's entire approval wait before firing.
   agents-narrate:
-    needs: [gates, deploy]
+    needs: gates
     if: always()
     uses: hops-poc/paved-road/.github/workflows/agents.yml@94625e5cd7378751dc6085b73873cdfa5b3c04d0
 

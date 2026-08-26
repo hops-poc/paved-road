@@ -152,7 +152,11 @@ data "aws_iam_policy_document" "trust_agents_inference" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:job_workflow_ref"
-      values   = [local.job_workflow_ref_agents]
+      # narrate-dev/narrate-prod live inside deploy.yml (not agents.yml) so
+      # they can sit at the right points in deploy's own job DAG — a job's
+      # job_workflow_ref is the file IT runs in, not the file that called
+      # it, so this role now needs to trust both files.
+      values = [local.job_workflow_ref_agents, local.job_workflow_ref_deploy]
     }
   }
 }
