@@ -156,10 +156,13 @@ jobs:
           fi
 
       # Append-only audit row (agents-inference's IAM policy grants PutItem
-      # only — no Update/Delete). cost_usd_est uses Bedrock Haiku's public
-      # per-token rate as an approximation; AI-GOVERNANCE.md §4 already
-      # states exact per-call dollars aren't attainable from AWS billing and
-      # treats this as an estimate reconciled monthly against Cost Explorer.
+      # only — no Update/Delete). cost_usd_est uses the real us-east-1
+      # standard on-demand rate card for this model, confirmed live via
+      # `aws bedrock list-foundation-model-agreement-offers` (USE1_InputTokenCount
+      # $1.10/USE1_OutputTokenCount $5.50 per million tokens) — not a guess.
+      # AI-GOVERNANCE.md §4 still treats this as an estimate reconciled
+      # monthly against Cost Explorer, since Bedrock's bill attributes to the
+      # account, not the individual call.
       - name: Write ledger row
         if: always()
         env:
@@ -171,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-          COST=$(awk -v i="$TOKENS_IN" -v o="$TOKENS_OUT" 'BEGIN { printf "%.6f", (i/1000*0.0008) + (o/1000*0.004) }')
+          COST=$(awk -v i="$TOKENS_IN" -v o="$TOKENS_OUT" 'BEGIN { printf "%.6f", (i/1000000*1.10) + (o/1000000*5.50) }')
           PROMPT_HASH=$(printf '%s%s' "$FAILED_NAME" "$FAILED_LOG" | sha256sum | cut -d' ' -f1)
 
           aws dynamodb put-item --table-name hello-world-svc-agent-ledger --item "$(jq -n \
