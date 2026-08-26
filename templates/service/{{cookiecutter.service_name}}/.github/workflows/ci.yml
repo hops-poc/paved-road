@@ -17,15 +17,23 @@ permissions:
 
 jobs:
   gates:
-    uses: hops-poc/paved-road/.github/workflows/plan.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
+    uses: hops-poc/paved-road/.github/workflows/plan.yml@94625e5cd7378751dc6085b73873cdfa5b3c04d0
     secrets: inherit
 
+  # Runs last, after deploy's whole internal chain (deploy-dev → smoke-test-dev
+  # → deploy-prod → smoke-test-prod) has settled — otherwise the agents that
+  # land here later would narrate a deploy that hasn't happened yet. `deploy`
+  # alone would order this correctly (it already needs gates), but listing both
+  # keeps needs.gates.result readable from inside the job: ReviewBot explains a
+  # gate failure on PR runs, where deploy is skipped and carries no signal.
+  # if: always() — deploy is skipped on PRs and may fail on main; skipped and
+  # failed both count as completed deps, so this job still runs in every case.
   agents-narrate:
-    needs: gates
+    needs: [gates, deploy]
     if: always()
-    uses: hops-poc/paved-road/.github/workflows/agents.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
+    uses: hops-poc/paved-road/.github/workflows/agents.yml@94625e5cd7378751dc6085b73873cdfa5b3c04d0
 
   deploy:
     needs: gates
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: hops-poc/paved-road/.github/workflows/deploy.yml@04db2a4c514efb8720c95a5c2478041e8de51f63
+    uses: hops-poc/paved-road/.github/workflows/deploy.yml@94625e5cd7378751dc6085b73873cdfa5b3c04d0
