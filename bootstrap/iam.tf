@@ -80,14 +80,14 @@ data "aws_iam_policy_document" "trust_deploy_dev" {
       variable = "token.actions.githubusercontent.com:aud"
       values   = ["sts.amazonaws.com"]
     }
-    # pull_request → preview deploys; ref:refs/heads/main → dev deploy on merge.
+    # ref:refs/heads/main → dev deploy on merge. Previews were cut (org RCP
+    # blocks anonymous Function URLs — see hops.ai-demo/docs/DECISIONS.md),
+    # so the pull_request trust arm this role used to need for preview
+    # deploys is gone; only main-branch deploys assume this role now.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${local.gh_owner_repo}:pull_request",
-        "repo:${local.gh_owner_repo}:ref:refs/heads/main",
-      ]
+      values   = ["repo:${local.gh_owner_repo}:ref:refs/heads/main"]
     }
     condition {
       test     = "StringLike"
@@ -211,7 +211,7 @@ resource "aws_iam_role_policy" "plan_readonly" {
 }
 
 # ---------------------------------------------------------------------------
-# deploy-dev — writes dev + preview (pr-*) named resources only.
+# deploy-dev — writes dev-named resources only.
 # ---------------------------------------------------------------------------
 resource "aws_iam_role" "deploy_dev" {
   name               = "paved-road-deploy-dev"
@@ -226,7 +226,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
   # prod, and defeat the whole point of a per-env role (caught in review —
   # an earlier draft of this file did exactly that).
   statement {
-    sid    = "WriteDevAndPreviewNamedResources"
+    sid    = "WriteDevNamedResources"
     effect = "Allow"
     actions = [
       "lambda:*",
@@ -236,26 +236,20 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
     ]
     resources = [
       "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-dev*",
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-pr-*",
       "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-dev*",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-pr-*",
       "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.svc_name_prefix}",
       "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-dev*",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-pr-*",
     ]
   }
   # CloudWatch alarms ARE ARN-addressable — scope by name, same as everything else.
   statement {
-    sid    = "ManageDevAndPreviewAlarms"
+    sid    = "ManageDevAlarms"
     effect = "Allow"
     actions = [
       "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
       "cloudwatch:DescribeAlarms", "cloudwatch:SetAlarmState", "cloudwatch:TagResource",
     ]
-    resources = [
-      "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-dev*",
-      "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-pr-*",
-    ]
+    resources = ["arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-dev*"]
   }
   # ecr:GetAuthorizationToken is an account/region-level action (the docker
   # login token isn't per-repository) — AWS requires Resource "*" for it,
@@ -310,10 +304,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       # live via AccessDenied on ListRolePolicies during tofu apply's refresh.
       "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
     ]
-    resources = [
-      "arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-dev-exec",
-      "arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-pr-*-exec",
-    ]
+    resources = ["arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-dev-exec"]
   }
   statement {
     sid       = "StateBackend"
@@ -324,7 +315,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
 }
 
 resource "aws_iam_role_policy" "deploy_dev" {
-  name   = "write-dev-and-preview"
+  name   = "write-dev"
   role   = aws_iam_role.deploy_dev.id
   policy = data.aws_iam_policy_document.deploy_dev_perms.json
 }

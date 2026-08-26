@@ -21,7 +21,7 @@ comments for the file-path convention this commits session 3 to.
 | Role | Assumed by | Trust condition (`sub` **and** `job_workflow_ref`) | Can |
 |---|---|---|---|
 | `plan-readonly` | any same-repo PR job (`tofu plan`) | `pull_request` + `plan.yml` | Read/describe the services in §12 of the PRD. Nothing that mutates state. |
-| `deploy-dev` | preview + dev deploy jobs | (`pull_request` or `ref:refs/heads/main`) + `deploy.yml` | Write Lambda/DynamoDB/ECR/logs/CloudWatch-alarm resources named `hello-world-svc-{dev,pr-*}-*`, plus CloudFront distribution management (unscopable by ARN pre-create — action list is the actual boundary there). |
+| `deploy-dev` | dev deploy job | `ref:refs/heads/main` + `deploy.yml` | Write Lambda/DynamoDB/ECR/logs/CloudWatch-alarm resources named `hello-world-svc-dev-*`, plus CloudFront distribution management (unscopable by ARN pre-create — action list is the actual boundary there). |
 | `deploy-prod` | prod deploy job, post-approval | `environment:prod` + `deploy.yml` | Same shape, `hello-world-svc-prod-*` only. **Unassumable until the GitHub Environment reviewer approves** — the environment-scoped `sub` composes the approval gate with IAM instead of leaving it purely in Actions config. |
 | `agents-inference` | ReviewBot/Triage/Release/Incident | `pull_request`/`ref:refs/heads/main`/`environment:{dev,prod}` + `agents.yml` | `bedrock:InvokeModel` on one allow-listed model + write to the ledger table. Nothing else — an agent identity is a credential like any other (DECISIONS.md §1). |
 
@@ -66,8 +66,7 @@ and don't get this backwards.
 3. Uncomment the `backend "s3"` block in `main.tf`, then
    `tofu init -migrate-state` — moves bootstrap's own state into the
    bucket it just created. From here on every stack (`dev/`, `prod/`,
-   `previews/pr-<n>/`, and this one) is S3-backed, per-stack state file
-   (PRD §5.4).
+   and this one) is S3-backed, per-stack state file (PRD §5.4).
 
 DynamoDB lock table, not S3 native locking: OpenTofu 1.8+ supports S3's
 native `use_lockfile` locking, but DynamoDB is kept for now to avoid
@@ -77,4 +76,7 @@ a state migration mid-bootstrap. Can be dropped later once the bucket exists.
 `deploy.yml` exists, routine applies go through its OIDC-scoped roles; local
 apply with a long-lived admin credential is break-glass only, invoked
 explicitly by a human with the reason recorded (hops.ai-demo's
-`CLAUDE.md` hard constraints, `DECISIONS.md` §3).
+`CLAUDE.md` hard constraints, `DECISIONS.md` §3). `deploy-dev`'s trust and
+permissions were narrowed the same way after PR previews were cut (dropped
+the `pull_request` trust arm and all `pr-*`-named resource grants) — `bootstrap/`
+still has no CI apply route of its own.

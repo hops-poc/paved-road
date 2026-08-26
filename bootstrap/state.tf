@@ -1,5 +1,5 @@
 # One bucket, one state file per stack inside it (PRD §5.4): bootstrap/,
-# dev/, prod/, previews/pr-<n>/. Versioned so a bad apply's state is
+# dev/, prod/. Versioned so a bad apply's state is
 # recoverable; not public, ever — this is exactly the kind of bucket
 # scenario 6 (public S3 via a bad plan) tests policy against.
 

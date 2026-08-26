@@ -21,18 +21,18 @@
       }
     },
     {
-      "address": "aws_dynamodb_table.preview",
+      "address": "aws_dynamodb_table.this",
       "mode": "managed",
       "type": "aws_dynamodb_table",
-      "name": "preview",
+      "name": "this",
       "provider_name": "registry.opentofu.org/hashicorp/aws",
       "change": {
         "actions": ["create"],
         "before": null,
         "after": {
-          "name": "hello-world-svc-pr-42",
+          "name": "hello-world-svc-dev",
           "billing_mode": "PAY_PER_REQUEST",
-          "tags": { "env": "preview" }
+          "tags": {}
         }
       }
     }

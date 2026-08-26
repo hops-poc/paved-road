@@ -1,5 +1,5 @@
 output "function_url" {
-  description = "Direct Lambda Function URL (the origin CloudFront fronts; used raw by previews)"
+  description = "Direct Lambda Function URL — the origin CloudFront fronts"
   value       = aws_lambda_function_url.this.function_url
 }
 

@@ -15,7 +15,7 @@ variable "image_uri" {
 }
 
 variable "enable_cloudfront" {
-  description = "Persistent envs (dev/prod) front Lambda with CloudFront; previews skip it (§5.2)"
+  description = "Always true in practice — previews (the only caller that would set false) were cut, see main.tf"
   type        = bool
   default     = true
 }

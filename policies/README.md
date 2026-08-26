@@ -78,7 +78,7 @@ without inventing a resource-level tagging hack.
 | File | Denies when | Scenario |
 |---|---|---|
 | `s3_public_access.rego` | An `aws_s3_bucket_public_access_block` has any of its 4 booleans `false`, or an `aws_s3_bucket` has no matching block (matched by resource name — see file header) | 6 |
-| `cost_allocation_tags.rego` | A taggable resource is missing `tags.env`, or `tags.env == "preview"` without `tags.pr`/`tags.ttl` | 7 |
+| `cost_allocation_tags.rego` | A taggable resource is missing `tags.env` | 7 |
 | `ecr_image_pinning.rego` | An `aws_ecr_repository` isn't `image_tag_mutability = IMMUTABLE`, or a Lambda `image_uri` lacks `@sha256:` | 2 |
 | `function_url_auth.rego` | `aws_lambda_function_url.authorization_type == "NONE"` without the `authorizer_exception` variable | — |
 | `stateful_destroy_ack.rego` | An `aws_dynamodb_table` is deleted/replaced without the `destroy_ack` variable | 9 |

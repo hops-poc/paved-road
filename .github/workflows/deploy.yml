@@ -12,11 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  # Preview environment deploy (per-PR `pr-<n>` stacks) is deferred to a
-  # future pass. When it lands: same fork-gate pattern as plan.yml's
-  # tofu-plan (`sub` doesn't distinguish fork PRs), the deploy-dev role
-  # (its trust policy already allows `pull_request` subs for this),
-  # enable_cloudfront=false on the module. Seam documented, not built.
+  # Preview environments were cut (hops.ai-demo/docs/DECISIONS.md): this org's
+  # Resource Control Policy blocks anonymous Lambda Function URLs account-wide,
+  # and CloudFront-per-preview would reintroduce the ~10min provisioning delay
+  # previews existed to avoid. Only dev/prod stacks exist.
   deploy-dev:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

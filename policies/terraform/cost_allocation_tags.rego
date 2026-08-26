@@ -1,6 +1,5 @@
-# PRD §7 / DECISIONS.md scenario 7: mandatory cost-allocation tags. Tags are
-# how cost reporting and the TTL sweeper find resources at all — see
-# DECISIONS.md §5 row 7.
+# PRD §7 / DECISIONS.md scenario 7: mandatory cost-allocation tags. The `env`
+# tag is how per-environment cost is attributed in Cost Explorer.
 package terraform.tags
 
 # Resource types this project tags for cost allocation. Kept to what
@@ -19,22 +18,4 @@ deny contains msg if {
 	rc.change.after != null
 	not rc.change.after.tags.env
 	msg := sprintf("%s: missing required tag 'env'", [rc.address])
-}
-
-deny contains msg if {
-	some rc in input.resource_changes
-	taggable_types[rc.type]
-	rc.change.after != null
-	rc.change.after.tags.env == "preview"
-	not rc.change.after.tags.pr
-	msg := sprintf("%s: tags.env = \"preview\" requires tags.pr", [rc.address])
-}
-
-deny contains msg if {
-	some rc in input.resource_changes
-	taggable_types[rc.type]
-	rc.change.after != null
-	rc.change.after.tags.env == "preview"
-	not rc.change.after.tags.ttl
-	msg := sprintf("%s: tags.env = \"preview\" requires tags.ttl", [rc.address])
 }

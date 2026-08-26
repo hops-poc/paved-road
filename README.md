@@ -1,7 +1,7 @@
 # paved-road
 
 The platform. Application teams ship through it, not around it: branch → gates →
-preview → dev → human-approved prod, without leaving the console. Spec and rationale
+dev → human-approved prod, without leaving the console. Spec and rationale
 live in the planning workspace (`hops.ai-demo`) until they're final — `DECISIONS.md`
 and `AI-GOVERNANCE.md` land here at the repo root once they're out of draft.
 

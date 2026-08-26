@@ -27,16 +27,15 @@ bad_plan := {"resource_changes": [
 		"change": {"actions": ["create"], "after": {"tags": {}}},
 	},
 	{
-		"address": "aws_dynamodb_table.preview",
+		"address": "aws_dynamodb_table.this",
 		"type": "aws_dynamodb_table",
-		"name": "preview",
-		"change": {"actions": ["create"], "after": {"tags": {"env": "preview"}}},
+		"name": "this",
+		"change": {"actions": ["create"], "after": {"tags": {}}},
 	},
 ]}
 
-test_cost_allocation_tags_denies_missing_env_and_preview_pr_ttl if {
-	# lambda: missing env (1) + dynamodb: preview missing pr (1) + preview missing ttl (1)
-	count(deny) == 3 with input as bad_plan
+test_cost_allocation_tags_denies_missing_env if {
+	count(deny) == 2 with input as bad_plan
 }
 
 test_cost_allocation_tags_allows_good_plan if {

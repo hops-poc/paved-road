@@ -1,6 +1,8 @@
 # The service stack (PRD §5.2): container Lambda behind a Function URL, with
-# DynamoDB and — for persistent envs — CloudFront in front. One module, reused
-# by dev, prod, and (session 4) previews with enable_cloudfront=false.
+# DynamoDB and CloudFront in front. One module, reused by dev and prod.
+# Previews were cut — this org's Resource Control Policy blocks anonymous
+# Function URLs account-wide, and CloudFront-per-preview defeats the speed
+# rationale previews existed for (hops.ai-demo/docs/DECISIONS.md).
 
 terraform {
   required_version = ">= 1.8.0"
