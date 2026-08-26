@@ -370,13 +370,27 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
       "cloudfront:CreateDistribution", "cloudfront:GetDistribution", "cloudfront:UpdateDistribution",
       "cloudfront:DeleteDistribution", "cloudfront:ListDistributions", "cloudfront:TagResource",
       "cloudfront:ListTagsForResource", "cloudfront:CreateInvalidation",
+      "cloudfront:CreateOriginAccessControl", "cloudfront:GetOriginAccessControl",
+      "cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl",
     ]
     resources = ["*"]
   }
+  # Same three gaps found live against deploy-dev — mirrored here rather
+  # than discovered a second time the hard way.
   statement {
-    sid       = "PassAndManageLambdaExecRole"
+    sid       = "LogsDescribe"
     effect    = "Allow"
-    actions   = ["iam:CreateRole", "iam:DeleteRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:PassRole", "iam:GetRole", "iam:TagRole"]
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+  statement {
+    sid    = "PassAndManageLambdaExecRole"
+    effect = "Allow"
+    actions = [
+      "iam:CreateRole", "iam:DeleteRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+      "iam:PassRole", "iam:GetRole", "iam:TagRole",
+      "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+    ]
     resources = ["arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-prod-exec"]
   }
   statement {
