@@ -64,20 +64,20 @@ jobs:
             *)                                echo "agent=Triage" >> "$GITHUB_OUTPUT" ;;
           esac
 
-          # `gh run view --log-failed` needs the *whole run* completed, not
-          # just this job — found live: it silently returned nothing while
-          # this run was still in progress (agent-narrate itself was one of
-          # its still-running jobs). Fetching the specific failed job's own
-          # log by ID has no such dependency on overall run status.
+          # `gh run view --log` (even scoped to one --job) refuses until the
+          # *whole run* is complete — found live: "run ... is still in
+          # progress; logs will be available when it is complete". That's
+          # fatal here since agent-narrate is itself one of this run's jobs,
+          # so the run is by definition incomplete while this step runs.
+          # The raw per-job logs endpoint has no such restriction — a job's
+          # own log is archived as soon as that job finishes, independent of
+          # its siblings — so hit it directly instead of the `run view` CLI
+          # abstraction.
           if [ -n "$JOB_ID" ]; then
-            # `gh run view` (unlike the `gh api repos/... ` call above) infers
-            # the repo from the local git remote when --repo is omitted —
-            # found live: "failed to determine base repo: not a git
-            # repository", since this job never checks out any code.
-            LOG=$(gh run view "${{ github.run_id }}" --repo "${{ github.repository }}" --job "$JOB_ID" --log 2>gh_log_err.txt | tail -c 4000) || true
+            LOG=$(gh api "repos/${{ github.repository }}/actions/jobs/$JOB_ID/logs" 2>gh_log_err.txt | tail -c 4000) || true
             if [ -z "$LOG" ]; then
               ERR=$(cat gh_log_err.txt)
-              echo "::warning::gh run view --log returned nothing for job $JOB_ID: $ERR"
+              echo "::warning::fetching logs for job $JOB_ID returned nothing: $ERR"
               LOG="log unavailable ($ERR)"
             fi
           else
