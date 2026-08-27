@@ -74,12 +74,15 @@ jobs:
           # its siblings — so hit it directly instead of the `run view` CLI
           # abstraction.
           if [ -n "$JOB_ID" ]; then
-            # Raw logs are prefixed per-line with an ISO-8601 timestamp, full
-            # of ANSI color codes, and wrapped in ##[group]/##[endgroup]
-            # markers — found live: fed straight to Bedrock, the model
-            # fixated on the escape codes instead of the actual error.
-            # Strip all three before truncating.
-            LOG=$(gh api "repos/${{ github.repository }}/actions/jobs/$JOB_ID/logs" 2>gh_log_err.txt \
+            # `gh api` refuses to print any response containing escape
+            # sequences at all (exits 1, empty stdout) unless told
+            # otherwise — found live: every prior attempt silently hit this
+            # gate and fell straight to the "log unavailable" branch below,
+            # which is why the log was never actually reaching Bedrock.
+            # --allow-escape-sequences opts in; the sed/grep pipeline
+            # afterward strips those same sequences (plus timestamps and
+            # ##[group] noise) before the text is truncated and used.
+            LOG=$(gh api --allow-escape-sequences "repos/${{ github.repository }}/actions/jobs/$JOB_ID/logs" 2>gh_log_err.txt \
               | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z //; s/\x1b\[[0-9;]*[a-zA-Z]//g' \
               | grep -Ev '^##\[(group|endgroup)\]' \
               | tail -c 4000) || true
