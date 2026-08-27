@@ -74,7 +74,15 @@ jobs:
           # its siblings — so hit it directly instead of the `run view` CLI
           # abstraction.
           if [ -n "$JOB_ID" ]; then
-            LOG=$(gh api "repos/${{ github.repository }}/actions/jobs/$JOB_ID/logs" 2>gh_log_err.txt | tail -c 4000) || true
+            # Raw logs are prefixed per-line with an ISO-8601 timestamp, full
+            # of ANSI color codes, and wrapped in ##[group]/##[endgroup]
+            # markers — found live: fed straight to Bedrock, the model
+            # fixated on the escape codes instead of the actual error.
+            # Strip all three before truncating.
+            LOG=$(gh api "repos/${{ github.repository }}/actions/jobs/$JOB_ID/logs" 2>gh_log_err.txt \
+              | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z //; s/\x1b\[[0-9;]*[a-zA-Z]//g' \
+              | grep -Ev '^##\[(group|endgroup)\]' \
+              | tail -c 4000) || true
             if [ -z "$LOG" ]; then
               ERR=$(cat gh_log_err.txt)
               echo "::warning::fetching logs for job $JOB_ID returned nothing: $ERR"
