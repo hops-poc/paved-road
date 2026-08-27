@@ -139,9 +139,31 @@ jobs:
             exit 0
           fi
 
-          PROMPT=$(jq -n --arg job "$FAILED_NAME" --arg log "$FAILED_LOG" \
-            '"A CI gate job named \($job) failed. In 2-3 plain-language sentences, explain what likely went wrong and, if the log names a policy, why that policy exists. Log tail:\n\($log)"')
-          BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:300,messages:[{role:"user",content:$p}]}')
+          # One prompt for both agents: the "why does this rule exist" clause is
+          # conditional on the log naming a policy, which covers ReviewBot's
+          # mandate (AI-GOVERNANCE.md roster) without a second divergent prompt
+          # path — the posted ${AGENT_NAME} header already tells the reader
+          # which lane produced it. Sections are omit-if-empty on purpose: a
+          # one-line lint break should render as two lines, not five padded
+          # blocks, and a missing log must say so rather than be filled in.
+          # -r matters: without it jq emits a JSON-quoted string, so the prompt
+          # reached Bedrock wrapped in quotes with literal \n two-char
+          # sequences instead of newlines. Tolerable for one prose sentence,
+          # not for a multi-section format instruction. Still --arg-built —
+          # the re-encoding happens in the BODY jq below.
+          PROMPT=$(jq -rn --arg job "$FAILED_NAME" --arg log "$FAILED_LOG" '
+              "A CI gate job named \($job) failed. Explain it to the developer who broke it. Reply in this exact Markdown, in this order, and nothing else:\n"
+            + "\n**What failed** — one line: the job plus the specific check, file, or rule.\n"
+            + "\n**Error** — the exact error text from the log in a fenced code block, trimmed to the lines that matter.\n"
+            + "\n**Why** — one or two sentences on the root cause. If the log names a policy or rule, say what it enforces and why it exists.\n"
+            + "\n**Fix** — the concrete change to make, with file and line when the log gives them.\n"
+            + "\n**Recommendations** — only if there is something non-obvious worth adding.\n"
+            + "\nRules: no preamble, no closing summary, no restating these instructions. One or two lines per section. Omit any heading you cannot fill from the log rather than padding it. If the log below has no usable error output, reply with exactly this and nothing else: **Error** — log content was not available for this failure.\n"
+            + "\nLog tail:\n\($log)"')
+          # 500, not 300: five short sections plus a fenced code block overran
+          # 300 and cut off mid-sentence. Worst case 500 output tokens is
+          # $0.00275/call at $5.50/M — noise against the §13 budget.
+          BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:500,messages:[{role:"user",content:$p}]}')
 
           aws bedrock-runtime invoke-model \
             --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \
