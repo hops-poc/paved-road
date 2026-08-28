@@ -166,7 +166,7 @@ jobs:
           sha256sum --ignore-missing -c checksums.txt
           tar -xzf "conftest_${VERSION}_Linux_x86_64.tar.gz" conftest
           chmod +x conftest
-      - run: ./conftest test Dockerfile --parser dockerfile -p policies-src/policies/dockerfile
+      - run: ./conftest test Dockerfile --parser dockerfile -p policies-src/policies/dockerfile --all-namespaces
 
   workflow-integrity:
     runs-on: ubuntu-latest
@@ -187,7 +187,7 @@ jobs:
           sha256sum --ignore-missing -c checksums.txt
           tar -xzf "conftest_${VERSION}_Linux_x86_64.tar.gz" conftest
           chmod +x conftest
-      - run: ./conftest test .github/workflows/ci.yml --parser yaml -p policies-src/policies/workflows
+      - run: ./conftest test .github/workflows/ci.yml --parser yaml -p policies-src/policies/workflows --all-namespaces
 
   # --- reporting only — coverage/cost/licenses never block the gate ------
   sbom-license-scan:
