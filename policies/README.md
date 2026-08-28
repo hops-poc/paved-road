@@ -126,9 +126,9 @@ Run from `paved-road/`:
 ```
 conftest verify -p policies/terraform   # 16 tests
 conftest verify -p policies/dockerfile  # 6 tests
-conftest verify -p policies/workflows   # 5 tests
+conftest verify -p policies/workflows   # 6 tests
 ```
 
-All 27 pass as of this writing (conftest 0.69.0, OPA 1.19.0, installed via
+All 28 pass as of this writing (conftest 0.69.0, OPA 1.19.0, installed via
 `brew install conftest` — not in `devbox.json`; add it there before wiring
 this into CI).
