@@ -66,17 +66,24 @@ deny contains msg if {
 
 # --- Check 4: the policy gate itself hasn't been deleted from the file ---
 # Fast-feedback echo of scenario 10 ("CI file edited to remove the security
-# stage"): at least one step must actually invoke conftest. This is a
-# convention this project defines (not in a public conftest doc) precisely
-# because the real anchor is the required-status-check ruleset, not this
-# file — see the package comment above.
+# stage"): either a step must actually invoke conftest directly, or (this
+# project's real shape, per hops.ai-demo's CLAUDE.md "three reusable
+# workflows") a job must call paved-road's reusable plan.yml, which runs
+# conftest on our behalf. This is a convention this project defines (not in
+# a public conftest doc) precisely because the real anchor is the
+# required-status-check ruleset, not this file — see the package comment above.
 deny contains msg if {
 	not any_step_runs_conftest
-	msg := "workflow has no step that runs `conftest test`/`conftest verify` — the policy gate appears to have been removed"
+	msg := "workflow has no step that runs `conftest test`/`conftest verify` (inline or via paved-road's reusable plan.yml) — the policy gate appears to have been removed"
 }
 
 any_step_runs_conftest if {
 	some step in all_steps
 	run := object.get(step, "run", "")
 	contains(run, "conftest ")
+}
+
+any_step_runs_conftest if {
+	some job
+	contains(input.jobs[job].uses, "paved-road/.github/workflows/plan.yml")
 }

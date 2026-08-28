@@ -82,3 +82,16 @@ test_workflow_integrity_denies_write_all if {
 test_workflow_integrity_allows_good_workflow if {
 	count(deny) == 0 with input as good_wf
 }
+
+good_wf_reusable_caller := {
+	"name": "ci",
+	"true": {"pull_request": null},
+	"permissions": {"contents": "read"},
+	"jobs": {"gates": {
+		"uses": "hops-poc/paved-road/.github/workflows/plan.yml@3b76cc94fdf42d5f3cdd0037151ac8927cb4d4b3",
+	}},
+}
+
+test_workflow_integrity_allows_reusable_workflow_caller if {
+	count(deny) == 0 with input as good_wf_reusable_caller
+}
