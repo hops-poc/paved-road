@@ -4,7 +4,9 @@
 # don't rename it without updating that trust policy.
 #
 # ReviewBot + Triage only (session 5, PRD §14 Tier 1: "ReviewBot + Triage on
-# Bedrock; agent ledger"). Release and Incident stay documented design only
+# Bedrock; agent ledger"). Inference moved off Bedrock (account-wide block,
+# Error 002) to NVIDIA NIM's DeepSeek endpoint — see DECISIONS.md. Release and
+# Incident stay documented design only
 # in AI-GOVERNANCE.md — Release's job is already satisfied by the human
 # GitHub Environment approval that runs end-to-end without an agent, and
 # Incident would be bolted onto RUNBOOK.md's already-recorded manual alias
@@ -19,6 +21,10 @@ on:
         description: "needs.gates.result from the calling workflow — this job has no direct needs: on gates itself"
         required: true
         type: string
+    secrets:
+      NVIDIA_API_KEY:
+        description: "NVIDIA NIM API key for the DeepSeek inference call (build.nvidia.com) — Bedrock is account-blocked, see DECISIONS.md"
+        required: true
 
 permissions:
   contents: read
@@ -106,12 +112,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # AI_ENABLED=false (repo/org variable) degrades to raw structured
-      # output — the pipeline is fully functional with zero Bedrock access
-      # (AI-GOVERNANCE.md §1); Bedrock is never load-bearing for the gate.
+      # output — the pipeline is fully functional with zero inference access
+      # (AI-GOVERNANCE.md §1); the model call is never load-bearing for the gate.
       - name: Explain the failure
         id: explain
         env:
           AI_ENABLED: ${{ vars.AI_ENABLED }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           # Untrusted content (build/test log output from the PR's own code)
           # goes through env, never spliced straight into the script via
           # ${{ }} — GitHub Actions substitutes ${{ }} into the script's raw
@@ -161,24 +168,26 @@ jobs:
             + "\nRules: no preamble, no closing summary, no restating these instructions. One or two lines per section. Omit any heading you cannot fill from the log rather than padding it. If the log below has no usable error output, reply with exactly this and nothing else: **Error** — log content was not available for this failure.\n"
             + "\nLog tail:\n\($log)"')
           # 500, not 300: five short sections plus a fenced code block overran
-          # 300 and cut off mid-sentence. Worst case 500 output tokens is
-          # $0.00275/call at $5.50/M — noise against the §13 budget.
-          BODY=$(jq -n --arg p "$PROMPT" '{anthropic_version:"bedrock-2023-05-31",max_tokens:500,messages:[{role:"user",content:$p}]}')
+          # 300 and cut off mid-sentence. NVIDIA's build.nvidia.com "Free
+          # Endpoint" tier for this model is unmetered against §13's AWS
+          # budget (10,000 req/day, 40 rpm — see DECISIONS.md), so there's no
+          # per-call cost ceiling to watch here the way there was on Bedrock.
+          BODY=$(jq -n --arg p "$PROMPT" '{model:"deepseek-ai/deepseek-v4-pro-0813",max_tokens:500,messages:[{role:"user",content:$p}]}')
 
-          aws bedrock-runtime invoke-model \
-            --model-id us.anthropic.claude-haiku-4-5-20251001-v1:0 \
-            --body "$BODY" \
-            --cli-binary-format raw-in-base64-out \
-            response.json
+          curl -sS https://integrate.api.nvidia.com/v1/chat/completions \
+            -H "Authorization: Bearer $NVIDIA_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            -o response.json
 
           DELIM="EXPLAIN_$(openssl rand -hex 8)"
           {
             echo "text<<$DELIM"
-            jq -r '.content[0].text' response.json
+            jq -r '.choices[0].message.content' response.json
             echo "$DELIM"
           } >> "$GITHUB_OUTPUT"
-          echo "tokens_in=$(jq -r '.usage.input_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
-          echo "tokens_out=$(jq -r '.usage.output_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
+          echo "tokens_in=$(jq -r '.usage.prompt_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
+          echo "tokens_out=$(jq -r '.usage.completion_tokens // 0' response.json)" >> "$GITHUB_OUTPUT"
 
       - name: Post narration
         env:
@@ -198,13 +207,11 @@ jobs:
           fi
 
       # Append-only audit row (agents-inference's IAM policy grants PutItem
-      # only — no Update/Delete). cost_usd_est uses the real us-east-1
-      # standard on-demand rate card for this model, confirmed live via
-      # `aws bedrock list-foundation-model-agreement-offers` (USE1_InputTokenCount
-      # $1.10/USE1_OutputTokenCount $5.50 per million tokens) — not a guess.
-      # AI-GOVERNANCE.md §4 still treats this as an estimate reconciled
-      # monthly against Cost Explorer, since Bedrock's bill attributes to the
-      # account, not the individual call.
+      # only — no Update/Delete). cost_usd_est is 0: this model runs on
+      # NVIDIA's build.nvidia.com free preview tier, not a metered rate card
+      # (see "Explain the failure"). Left as a tracked column rather than
+      # dropped so the ledger schema doesn't fork if a paid endpoint replaces
+      # this one later.
       - name: Write ledger row
         if: always()
         env:
@@ -216,14 +223,14 @@ jobs:
         run: |
           set -euo pipefail
           TS=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
-          COST=$(awk -v i="$TOKENS_IN" -v o="$TOKENS_OUT" 'BEGIN { printf "%.6f", (i/1000000*1.10) + (o/1000000*5.50) }')
+          COST=0.000000
           PROMPT_HASH=$(printf '%s%s' "$FAILED_NAME" "$FAILED_LOG" | sha256sum | cut -d' ' -f1)
 
           aws dynamodb put-item --table-name hello-world-svc-agent-ledger --item "$(jq -n \
             --arg agent "$AGENT_NAME" \
             --arg ts "$TS" \
             --arg trigger "$FAILED_NAME" \
-            --arg model "us.anthropic.claude-haiku-4-5-20251001-v1:0" \
+            --arg model "deepseek-ai/deepseek-v4-pro-0813" \
             --arg hash "$PROMPT_HASH" \
             --arg out_ref "run:${{ github.run_id }}" \
             --arg tin "$TOKENS_IN" --arg tout "$TOKENS_OUT" --arg cost "$COST" \
