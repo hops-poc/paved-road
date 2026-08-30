@@ -56,14 +56,14 @@ resource "aws_iam_role_policy" "exec" {
 
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${local.name}"
-  retention_in_days = 14
+  retention_in_days = var.log_retention_days
 }
 
 # On-demand table per env (§5.2). App is thin and doesn't read it yet — the
 # stack matches the documented architecture; $0 at rest.
 resource "aws_dynamodb_table" "this" {
   name         = local.name
-  billing_mode = "PAY_PER_REQUEST"
+  billing_mode = var.dynamodb_billing_mode
   hash_key     = "pk"
   attribute {
     name = "pk"
@@ -72,7 +72,7 @@ resource "aws_dynamodb_table" "this" {
 
   tags = {
     env     = var.env
-    Project = "hello-world-svc"
+    Project = var.name_prefix
   }
 }
 
@@ -82,8 +82,8 @@ resource "aws_lambda_function" "this" {
   package_type  = "Image"
   image_uri     = var.image_uri
   architectures = ["arm64"] # Graviton — cheaper, in budget
-  memory_size   = 512
-  timeout       = 15
+  memory_size   = var.memory
+  timeout       = var.timeout
   publish       = true # every image change publishes a version — rollback target (§5.3)
 
   environment {
@@ -94,7 +94,7 @@ resource "aws_lambda_function" "this" {
 
   tags = {
     env     = var.env
-    Project = "hello-world-svc"
+    Project = var.name_prefix
   }
 
   depends_on = [aws_cloudwatch_log_group.lambda]
@@ -186,7 +186,7 @@ resource "aws_cloudfront_distribution" "this" {
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   }
 
-  price_class = "PriceClass_100" # NA+EU edges only — cheapest
+  price_class = var.cloudfront_price_class
 
   restrictions {
     geo_restriction {
@@ -200,6 +200,6 @@ resource "aws_cloudfront_distribution" "this" {
 
   tags = {
     env     = var.env
-    Project = "hello-world-svc"
+    Project = var.name_prefix
   }
 }

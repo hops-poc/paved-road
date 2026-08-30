@@ -2,5 +2,6 @@
   "service_name": "hello-world-svc",
   "gh_org": "hops-poc",
   "description": "A trivial service shipped through the paved road",
-  "aws_region": "us-east-1"
+  "aws_region": "us-east-1",
+  "paved_road_ref": "REPLACE_WITH_PAVED_ROAD_SHA"
 }

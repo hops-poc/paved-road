@@ -1,4 +1,5 @@
-# Usage assumptions for cost estimation (PRD §9.8) — wired to the Infracost
-# CI step in session 3. Placeholder until real traffic assumptions exist.
+# Usage assumptions for cost estimation (PRD §9.8). Read by the Infracost step in
+# paved-road's plan.yml, which reports a cost delta — it never blocks (DECISIONS.md §4).
+# Empty means Infracost assumes nothing; fill in real traffic assumptions when you have them.
 version: 0.1
 resource_usage: {}

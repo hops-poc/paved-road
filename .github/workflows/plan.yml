@@ -74,7 +74,7 @@ jobs:
         with:
           tofu_version: "1.12.6"
       - run: |
-          cd infra/dev
+          cd infra
           tofu init -backend=false
           tofu validate
 
@@ -103,14 +103,14 @@ jobs:
           tofu_version: "1.12.6"
       - name: Plan (placeholder image digest — real one only exists after deploy.yml builds it)
         run: |
-          cd infra/dev
-          tofu init
-          tofu plan -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
+          cd infra
+          tofu init -backend-config="key=dev/terraform.tfstate"
+          tofu plan -var env=dev -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
           tofu show -json plan.out > plan.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: plan-json
-          path: infra/dev/plan.json
+          path: infra/plan.json
 
   conftest-terraform:
     needs: tofu-plan
@@ -244,4 +244,4 @@ jobs:
           mv infracost-linux-amd64 infracost
       - name: infracost breakdown
         if: ${{ env.INFRACOST_API_KEY != '' }}
-        run: ./infracost breakdown --path infra/dev --usage-file infracost-usage.yml
+        run: ./infracost breakdown --path infra --usage-file infracost-usage.yml

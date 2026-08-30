@@ -1,6 +1,6 @@
-# Session 3: calls paved-road's reusable gate/deploy/agents workflows
-# instead of containing pipeline logic here — that's the paved road. Pin
-# bumps to a new paved-road SHA go through a normal PR like any other change.
+# Calls paved-road's reusable gate/deploy/agents workflows instead of containing
+# pipeline logic here — that's the paved road. Pin bumps to a new paved-road SHA
+# go through a normal PR like any other change.
 name: ci
 
 on:
