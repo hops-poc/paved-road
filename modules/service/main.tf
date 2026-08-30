@@ -89,6 +89,8 @@ resource "aws_lambda_function" "this" {
   environment {
     variables = {
       TABLE_NAME = aws_dynamodb_table.this.name
+      APP_ENV    = var.env
+      APP_BUILD  = var.image_uri
     }
   }
 
