@@ -19,7 +19,8 @@ bun run dev
 |---|---|
 | `src/` — Bun server (SPA + `/api/*`) | live |
 | `.github/workflows/ci.yml` | live — calls `paved-road`'s `plan.yml` / `agents.yml` / `deploy.yml` at a pinned SHA. Full gate set, agent narration, dev→prod deploy. No pipeline logic lives here |
-| `infra/dev/`, `infra/prod/` | thin callers of `paved-road/modules/service` — fill in per the READMEs in each |
+| `infra/main.tf` | live — one stack for both environments, calling `paved-road/modules/service`. Don't hand-edit per environment |
+| `infra/config.yaml` | live — the only file you edit for infra changes: service name, module version pin, and per-environment overrides (memory, timeout, etc.) |
 | `infracost-usage.yml` | live — read by the Infracost reporting gate. Replace `resource_usage: {}` with real traffic assumptions when you have them |
 | `.claude/skills/{ship,watch}` | **not built** — console DX is the remaining gap. The pipeline they wrap works; use `gh` meanwhile (see each SKILL.md) |
 

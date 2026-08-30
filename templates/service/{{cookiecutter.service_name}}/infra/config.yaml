@@ -1,0 +1,17 @@
+# The only file you edit to change this service's infra. Read by infra/main.tf
+# via yamldecode — never hand-edit main.tf per environment.
+service: {{cookiecutter.service_name}}
+module_ref: {{cookiecutter.paved_road_ref}} # paved-road commit SHA; bump via PR to upgrade
+
+# Applied to every environment unless overridden below.
+defaults:
+  memory: 512
+  timeout: 15
+  log_retention_days: 14
+  dynamodb_billing_mode: PAY_PER_REQUEST
+  enable_cloudfront: true
+  cloudfront_price_class: PriceClass_100
+
+environments:
+  dev: {}
+  prod: {}

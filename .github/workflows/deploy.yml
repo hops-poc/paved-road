@@ -76,9 +76,9 @@ jobs:
       - name: Deploy dev
         id: deploy
         run: |
-          cd infra/dev
-          tofu init
-          tofu apply -auto-approve -var image_uri=${{ steps.build.outputs.image_uri }}
+          cd infra
+          tofu init -backend-config="key=dev/terraform.tfstate"
+          tofu apply -auto-approve -var env=dev -var image_uri=${{ steps.build.outputs.image_uri }}
           echo "dev_url=$(tofu output -raw url)" >> "$GITHUB_OUTPUT"
 
   # Separate job (not a step inside deploy-dev) so pass/fail shows as its
@@ -153,9 +153,9 @@ jobs:
       - name: Deploy prod (same digest deploy-dev built — never rebuild)
         id: deploy
         run: |
-          cd infra/prod
-          tofu init
-          tofu apply -auto-approve -var image_uri=${{ needs.deploy-dev.outputs.image_uri }}
+          cd infra
+          tofu init -backend-config="key=prod/terraform.tfstate"
+          tofu apply -auto-approve -var env=prod -var image_uri=${{ needs.deploy-dev.outputs.image_uri }}
           echo "prod_url=$(tofu output -raw url)" >> "$GITHUB_OUTPUT"
 
   # Same reasoning as smoke-test-dev — its own check, no AWS credentials.
