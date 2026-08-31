@@ -385,6 +385,7 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
       "iam:CreateRole", "iam:DeleteRole", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
       "iam:PassRole", "iam:GetRole", "iam:TagRole",
       "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+      "iam:ListInstanceProfilesForRole",
     ]
     resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-prod-exec"]
   }

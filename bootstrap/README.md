@@ -106,3 +106,13 @@ still has no CI apply route of its own.
   tic-tac-toe-svc arms/entries alongside the existing hello-world-svc ones.
   Ledger table deliberately left single/shared, not split per-service. 2
   added, 6 changed, 0 destroyed.
+- Session 8: `deploy_dev_perms`/`deploy_prod_perms`'s `PassAndManageLambdaExecRole`
+  statement gained `iam:ListInstanceProfilesForRole` — reason: tic-tac-toe-svc's
+  first dev deploy shared hello-world-svc's `dev/terraform.tfstate` key
+  (a separate bug, fixed in `plan.yml`/`deploy.yml`, paved-road#6) and
+  destroyed most of hello-world-svc's live dev resources trying to
+  reconcile them into tic-tac-toe-svc's — the destroy aborted partway
+  through on this exact missing permission (DeleteRole's own precondition
+  check), leaving `hello-world-svc-dev-exec` orphaned instead of cleanly
+  replaced. Recovery documented in paved-road#6. 0 added, 2 changed, 0
+  destroyed.
