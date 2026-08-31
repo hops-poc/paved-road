@@ -3,7 +3,7 @@
 # iam.tf. Append-only audit trail: agents only ever PutItem here, never
 # update/delete (enforced by IAM — the role has no UpdateItem/DeleteItem).
 resource "aws_dynamodb_table" "agent_ledger" {
-  name         = "${local.svc_name_prefix}-agent-ledger"
+  name         = "hello-world-svc-agent-ledger"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "agent"
   range_key    = "ts"

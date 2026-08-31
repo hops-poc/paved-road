@@ -9,10 +9,17 @@ variable "gh_paved_road_repo" {
   default     = "paved-road"
 }
 
-variable "gh_service_repo" {
-  description = "Name of the service repo whose pipeline assumes these roles"
-  type        = string
-  default     = "hello-world-svc"
+variable "services" {
+  description = "Service repos whose CI pipelines assume these roles. Each needs its numeric GitHub repo ID (gh api repos/<org>/<repo> --jq .id) for the immutable-subject-claims sub condition (see gh_org_id below)."
+  type = list(object({
+    name    = string # also the svc_name_prefix used for ECR repo name + Lambda/DynamoDB/log-group/exec-role/alarm ARN scoping
+    repo    = string # GitHub repo name
+    repo_id = string # numeric GitHub repo ID
+  }))
+  default = [
+    { name = "hello-world-svc", repo = "hello-world-svc", repo_id = "1345034033" },
+    { name = "tic-tac-toe-svc", repo = "tic-tac-toe-svc", repo_id = "1352315389" },
+  ]
 }
 
 # Repos created after 2026-07-15 default to GitHub's "immutable subject
@@ -30,12 +37,6 @@ variable "gh_org_id" {
   description = "Numeric GitHub org ID (immutable subject claims) — gh api orgs/<org> --jq .id"
   type        = string
   default     = "320600525"
-}
-
-variable "gh_service_repo_id" {
-  description = "Numeric GitHub repo ID for gh_service_repo (immutable subject claims) — gh api repos/<org>/<repo> --jq .id"
-  type        = string
-  default     = "1345034033"
 }
 
 variable "aws_region" {

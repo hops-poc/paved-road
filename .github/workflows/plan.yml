@@ -1,5 +1,5 @@
 # Reusable workflow: blocking + reporting gates run on every service PR.
-# Called by hello-world-svc's ci.yml via workflow_call. Job ids below are
+# Called by each service repo's ci.yml via workflow_call. Job ids below are
 # stable identifiers — they become required-status-check names — and this
 # file's path (paved-road/.github/workflows/plan.yml) is what
 # bootstrap/iam.tf's paved-road-plan-readonly trust policy matches against
@@ -61,7 +61,7 @@ jobs:
 
   tofu-validate:
     runs-on: ubuntu-latest
-    # No real credentials on purpose — hello-world-svc's provider blocks set
+    # No real credentials on purpose — the calling service repo's provider blocks set
     # skip_credentials_validation/skip_requesting_account_id so `tofu
     # validate` runs fully offline (verified locally: without those flags
     # the aws provider calls live STS even during validate and fails).
@@ -102,7 +102,7 @@ jobs:
         run: |
           cd infra
           tofu init -backend-config="key=dev/terraform.tfstate"
-          tofu plan -var env=dev -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/hello-world-svc@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
+          tofu plan -var env=dev -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/${{ github.event.repository.name }}@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
           tofu show -json plan.out > plan.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -123,7 +123,7 @@ jobs:
       contents: read
       actions: read # required by actions/download-artifact
     steps:
-      # policies/ lives in paved-road, not in the calling repo (hello-world-svc)
+      # policies/ lives in paved-road, not in the calling repo
       # — check out this reusable workflow's own repo/ref via the `job`
       # context, not the default checkout (which would fetch the caller).
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
