@@ -28,6 +28,13 @@ provider "aws" {
   # run offline; real deploys authenticate normally via OIDC.
   skip_credentials_validation = true
   skip_requesting_account_id  = true
+
+  default_tags {
+    tags = {
+      Service     = local.cfg.service
+      Environment = title(var.env)
+    }
+  }
 }
 
 variable "env" {
