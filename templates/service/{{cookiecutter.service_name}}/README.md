@@ -21,6 +21,7 @@ bun run dev
 | `.github/workflows/ci.yml` | live — calls `paved-road`'s `plan.yml` / `agents.yml` / `deploy.yml` at a pinned SHA. Full gate set, agent narration, dev→prod deploy. No pipeline logic lives here |
 | `infra/main.tf` | live — one stack for both environments, calling `paved-road/modules/service`. Don't hand-edit per environment |
 | `infra/config.yaml` | live — the only file you edit for infra changes: service name, module version pin, and per-environment overrides (memory, timeout, etc.) |
+| `infracost.yml` | live — points Infracost at `infra/` and `infracost-usage.yml`. Without this, the usage file is silently ignored and cost always reports $0 |
 | `infracost-usage.yml` | live — read by `infracost-diff.yml`'s cost-diff PR comment gate. Replace `resource_usage: {}` with real traffic assumptions when you have them |
 | `.github/workflows/infracost-diff.yml` | live — posts a cost-diff comment on every PR. One-time setup per service: `infracost ci setup --ci-pipeline` (or manually set the `INFRACOST_API_KEY` repo secret from your Infracost org's CLI-tokens page) |
 | `.claude/skills/{ship,watch}` | **not built** — console DX is the remaining gap. The pipeline they wrap works; use `gh` meanwhile (see each SKILL.md) |
