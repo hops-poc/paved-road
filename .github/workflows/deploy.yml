@@ -79,7 +79,9 @@ jobs:
           cd infra
           tofu init -backend-config="key=dev/terraform.tfstate"
           tofu apply -auto-approve -var env=dev -var image_uri=${{ steps.build.outputs.image_uri }}
-          echo "dev_url=$(tofu output -raw url)" >> "$GITHUB_OUTPUT"
+          URL=$(tofu output -raw url)
+          echo "dev_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "**dev:** $URL" >> "$GITHUB_STEP_SUMMARY"
 
   # Separate job (not a step inside deploy-dev) so pass/fail shows as its
   # own check in the Actions UI — a human deciding whether to approve prod
@@ -156,7 +158,9 @@ jobs:
           cd infra
           tofu init -backend-config="key=prod/terraform.tfstate"
           tofu apply -auto-approve -var env=prod -var image_uri=${{ needs.deploy-dev.outputs.image_uri }}
-          echo "prod_url=$(tofu output -raw url)" >> "$GITHUB_OUTPUT"
+          URL=$(tofu output -raw url)
+          echo "prod_url=$URL" >> "$GITHUB_OUTPUT"
+          echo "**prod:** $URL" >> "$GITHUB_STEP_SUMMARY"
 
   # Same reasoning as smoke-test-dev — its own check, no AWS credentials.
   smoke-test-prod:
