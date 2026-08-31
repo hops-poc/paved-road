@@ -95,3 +95,14 @@ still has no CI apply route of its own.
   from the bare foundation-model ID to the inference-profile ID
   (`us.anthropic.claude-haiku-4-5-20251001-v1:0`). 0 added, 1 changed, 0
   destroyed.
+- Session 8: generalized bootstrap from a single hardcoded service
+  (`hello-world-svc`) to a `services` list, to onboard a second real app
+  (`tic-tac-toe-svc`) onto the platform — reason: demonstrate the paved
+  road generalizes beyond the one demo service, not a one-off (paved-road#5).
+  `aws_ecr_repository.service`/`aws_ecr_lifecycle_policy.service` moved to
+  `for_each` (existing hello-world-svc repo state-moved, not recreated —
+  `moved` blocks in `ecr.tf`); the 4 IAM roles' trust `sub` conditions and
+  `deploy_dev`/`deploy_prod`'s named-resource ARN lists gained
+  tic-tac-toe-svc arms/entries alongside the existing hello-world-svc ones.
+  Ledger table deliberately left single/shared, not split per-service. 2
+  added, 6 changed, 0 destroyed.

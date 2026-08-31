@@ -4,12 +4,6 @@ data "aws_region" "current" {}
 locals {
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.name
-
-  # Everything the pipeline creates for the service is named with this
-  # prefix + env, so IAM can scope by resource name instead of needing
-  # separate AWS accounts per environment (DECISIONS.md §2: single account +
-  # per-purpose IAM roles is sufficient isolation at this scale).
-  svc_name_prefix = "hello-world-svc"
 }
 
 # ---------------------------------------------------------------------------
@@ -57,7 +51,7 @@ data "aws_iam_policy_document" "trust_plan_readonly" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.gh_owner_repo}:pull_request"]
+      values   = [for s in local.services : "repo:${s.gh_owner_repo}:pull_request"]
     }
     condition {
       test     = "StringLike"
@@ -87,7 +81,7 @@ data "aws_iam_policy_document" "trust_deploy_dev" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.gh_owner_repo}:ref:refs/heads/main"]
+      values   = [for s in local.services : "repo:${s.gh_owner_repo}:ref:refs/heads/main"]
     }
     condition {
       test     = "StringLike"
@@ -116,7 +110,7 @@ data "aws_iam_policy_document" "trust_deploy_prod" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.gh_owner_repo}:environment:prod"]
+      values   = [for s in local.services : "repo:${s.gh_owner_repo}:environment:prod"]
     }
     condition {
       test     = "StringLike"
@@ -142,12 +136,12 @@ data "aws_iam_policy_document" "trust_agents_inference" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${local.gh_owner_repo}:pull_request",        # ReviewBot, Triage
-        "repo:${local.gh_owner_repo}:ref:refs/heads/main", # Release (dev)
-        "repo:${local.gh_owner_repo}:environment:dev",
-        "repo:${local.gh_owner_repo}:environment:prod", # Release, Incident
-      ]
+      values = flatten([for s in local.services : [
+        "repo:${s.gh_owner_repo}:pull_request",        # ReviewBot, Triage
+        "repo:${s.gh_owner_repo}:ref:refs/heads/main", # Release (dev)
+        "repo:${s.gh_owner_repo}:environment:dev",
+        "repo:${s.gh_owner_repo}:environment:prod", # Release, Incident
+      ]])
     }
     condition {
       test     = "StringLike"
@@ -234,12 +228,12 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "ecr:*",
       "logs:*",
     ]
-    resources = [
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-dev*",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-dev*",
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.svc_name_prefix}",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-dev*",
-    ]
+    resources = flatten([for s in local.services : [
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${s.name}-dev*",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${s.name}-dev*",
+      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${s.name}",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${s.name}-dev*",
+    ]])
   }
   # CloudWatch alarms ARE ARN-addressable — scope by name, same as everything else.
   statement {
@@ -249,7 +243,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
       "cloudwatch:DescribeAlarms", "cloudwatch:SetAlarmState", "cloudwatch:TagResource",
     ]
-    resources = ["arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-dev*"]
+    resources = [for s in local.services : "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${s.name}-dev*"]
   }
   # ecr:GetAuthorizationToken is an account/region-level action (the docker
   # login token isn't per-repository) — AWS requires Resource "*" for it,
@@ -304,7 +298,7 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       # live via AccessDenied on ListRolePolicies during tofu apply's refresh.
       "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-dev-exec"]
+    resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-dev-exec"]
   }
   statement {
     sid       = "StateBackend"
@@ -342,12 +336,12 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
       "ecr:*",
       "logs:*",
     ]
-    resources = [
-      "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.svc_name_prefix}-prod*",
-      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-prod*",
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.svc_name_prefix}",
-      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${local.svc_name_prefix}-prod*",
-    ]
+    resources = flatten([for s in local.services : [
+      "arn:aws:lambda:${local.region}:${local.account_id}:function:${s.name}-prod*",
+      "arn:aws:dynamodb:${local.region}:${local.account_id}:table/${s.name}-prod*",
+      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${s.name}",
+      "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/${s.name}-prod*",
+    ]])
   }
   statement {
     sid    = "ManageProdAlarms"
@@ -356,7 +350,7 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
       "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms",
       "cloudwatch:DescribeAlarms", "cloudwatch:SetAlarmState", "cloudwatch:TagResource",
     ]
-    resources = ["arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${local.svc_name_prefix}-prod*"]
+    resources = [for s in local.services : "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:${s.name}-prod*"]
   }
   statement {
     sid    = "ManageCloudFrontDistributions"
@@ -386,7 +380,7 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
       "iam:PassRole", "iam:GetRole", "iam:TagRole",
       "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
     ]
-    resources = ["arn:aws:iam::${local.account_id}:role/${local.svc_name_prefix}-prod-exec"]
+    resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-prod-exec"]
   }
   statement {
     sid       = "StateBackend"
@@ -436,7 +430,7 @@ data "aws_iam_policy_document" "agents_inference_perms" {
     sid       = "WriteLedgerOnly"
     effect    = "Allow"
     actions   = ["dynamodb:PutItem"]
-    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/${local.svc_name_prefix}-agent-ledger"]
+    resources = ["arn:aws:dynamodb:${local.region}:${local.account_id}:table/hello-world-svc-agent-ledger"]
   }
 }
 

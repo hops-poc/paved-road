@@ -31,8 +31,13 @@ locals {
   # immutable subject claims, stays name-based regardless.
   gh_owner_paved_road = "${var.gh_org}/${var.gh_paved_road_repo}"
 
-  # Used in sub conditions — hello-world-svc was created after GitHub's
-  # 2026-07-15 immutable-subject-claims cutover, so sub is
-  # repo:org@org_id/repo@repo_id, not repo:org/repo (see variables.tf).
-  gh_owner_repo = "${var.gh_org}@${var.gh_org_id}/${var.gh_service_repo}@${var.gh_service_repo_id}"
+  # Used in sub conditions — hello-world-svc and later service repos were
+  # created after GitHub's 2026-07-15 immutable-subject-claims cutover, so
+  # sub is repo:org@org_id/repo@repo_id, not repo:org/repo (see
+  # variables.tf). One entry per trusted service repo.
+  services = {
+    for s in var.services : s.name => merge(s, {
+      gh_owner_repo = "${var.gh_org}@${var.gh_org_id}/${s.repo}@${s.repo_id}"
+    })
+  }
 }
