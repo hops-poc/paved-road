@@ -101,7 +101,7 @@ jobs:
       - name: Plan (placeholder image digest — real one only exists after deploy.yml builds it)
         run: |
           cd infra
-          tofu init -backend-config="key=dev/terraform.tfstate"
+          tofu init -backend-config="key=${{ github.event.repository.name }}/dev/terraform.tfstate"
           tofu plan -var env=dev -var image_uri=281832122084.dkr.ecr.us-east-1.amazonaws.com/${{ github.event.repository.name }}@sha256:0000000000000000000000000000000000000000000000000000000000000 -out=plan.out
           tofu show -json plan.out > plan.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

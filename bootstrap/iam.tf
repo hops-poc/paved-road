@@ -297,6 +297,12 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
       # Refresh-phase reads on the inline policy — missing originally, found
       # live via AccessDenied on ListRolePolicies during tofu apply's refresh.
       "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+      # DeleteRole's own precondition check — missing originally, found live:
+      # deploy-dev could delete the role's inline policy but AccessDenied'd on
+      # iam:ListInstanceProfilesForRole (a check IAM runs before actually
+      # deleting the role, unrelated to instance profiles ever being used
+      # here), aborting mid-replacement and leaving the role orphaned.
+      "iam:ListInstanceProfilesForRole",
     ]
     resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-dev-exec"]
   }

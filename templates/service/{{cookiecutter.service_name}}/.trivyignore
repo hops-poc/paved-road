@@ -1,0 +1,10 @@
+# Documented CVE exceptions, not a way to route around the gate (DECISIONS.md
+# §4: blocking objective findings is only defensible when being wrong is
+# rare — an undocumented blanket ignore would be exactly the gaming that
+# section warns against). Trivy's vulnerability DB is live, not pinned to
+# the image build, so this file starts empty — populate it as real findings
+# turn up, one CVE ID per line, each with a comment explaining why it's
+# not exploitable in this service's actual deployment shape (upstream
+# unfixable, or the affected package/library is never invoked by the app).
+# --ignorefile requires this file to exist even when empty — CI FATALs
+# without it (found live, session 8).

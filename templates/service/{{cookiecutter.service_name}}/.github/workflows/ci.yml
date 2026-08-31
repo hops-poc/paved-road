@@ -14,6 +14,7 @@ permissions:
   actions: read        # id-token/actions:read is silently dropped (or, for
                          # actions:read, hard-rejected at parse time) without this
                          # — conftest-terraform needs it for actions/download-artifact.
+  pull-requests: write   # ReviewBot/Triage (agents.yml) comment on PRs
 
 jobs:
   gates:
@@ -31,6 +32,9 @@ jobs:
     needs: gates
     if: always()
     uses: hops-poc/paved-road/.github/workflows/agents.yml@a2c8274e21ec095653d62ea5d3efdb493e703c2a
+    with:
+      gates_result: ${{ needs.gates.result }}
+    secrets: inherit
 
   deploy:
     needs: gates

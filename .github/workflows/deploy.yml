@@ -77,7 +77,7 @@ jobs:
         id: deploy
         run: |
           cd infra
-          tofu init -backend-config="key=dev/terraform.tfstate"
+          tofu init -backend-config="key=${{ github.event.repository.name }}/dev/terraform.tfstate"
           tofu apply -auto-approve -var env=dev -var image_uri=${{ steps.build.outputs.image_uri }}
           URL=$(tofu output -raw url)
           echo "dev_url=$URL" >> "$GITHUB_OUTPUT"
@@ -156,7 +156,7 @@ jobs:
         id: deploy
         run: |
           cd infra
-          tofu init -backend-config="key=prod/terraform.tfstate"
+          tofu init -backend-config="key=${{ github.event.repository.name }}/prod/terraform.tfstate"
           tofu apply -auto-approve -var env=prod -var image_uri=${{ needs.deploy-dev.outputs.image_uri }}
           URL=$(tofu output -raw url)
           echo "prod_url=$URL" >> "$GITHUB_OUTPUT"
