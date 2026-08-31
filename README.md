@@ -1,67 +1,264 @@
 # paved-road
 
-The platform. Application teams ship through it, not around it: branch → gates →
-dev → human-approved prod, without leaving the console. Spec and rationale
-live in the planning workspace (`hops.ai-demo`) until they're final — `DECISIONS.md`
-and `AI-GOVERNANCE.md` land here at the repo root once they're out of draft.
+The platform application teams ship **through**, not around. A service repo contains its
+own code and a ~30-line `ci.yml`; every gate, deploy step, and IAM boundary lives here
+and is consumed at a pinned SHA.
 
-## What's here
+```
+branch → gates → merge → dev → smoke test → human approval → prod → smoke test
+```
 
-**Session 1:** scaffold and bootstrap authored, verified locally.
-**Session 2:** both repos pushed to `github.com/hops-poc`.
-**Session 3:** bootstrap applied to AWS — IAM roles and state backend live (account `281832122084`, `us-east-1`).
-**Session 4:** runtime live — shared ECR repo added to bootstrap; `modules/service` authored; `hello-world-svc`'s dev + prod stacks applied. Both serve the SPA and `/api/*` through CloudFront.
-**Session 5:** full CI/CD live. Both repos flipped to public (required for rulesets and for the fork-isolation threat model to be real). `plan.yml`/`deploy.yml`/`agents.yml` and `policies/` (9 OPA/Conftest policies, 27 tests) authored and wired; `hello-world-svc` gets required status checks, a repo ruleset, CODEOWNERS, and `dev`/`prod` GitHub Environments (prod requires a human reviewer). The full branch → gates → dev → smoke test → human approval → prod → smoke test flow ran and passed end-to-end on real infrastructure. Along the way, ~10 real bugs surfaced only by a live run and got fixed: GitHub's immutable OIDC subject claims (IAM `sub` format changed for repos created after 2026-07-15), several missing IAM permissions on `deploy-dev`/`deploy-prod` (`ecr:GetAuthorizationToken`, `logs:DescribeLogGroups`, CloudFront OAC actions, IAM role-policy reads), an arm64/amd64 image mismatch, buildx's default provenance attestation breaking Lambda's `UpdateFunctionCode`, ECR tag immutability breaking retries, and Bun's dev-server Host-header check blocking CloudFront. Agent narration checkpoints (`agents-narrate`, `narrate-dev`, `narrate-prod`) were wired into the pipeline at the points a human needs them, as no-op placeholders at this point (real ReviewBot/Triage logic landed in session 7, below).
-**Session 6:** PR preview environments cut — this AWS account's org-wide Resource Control Policy blocks anonymous Lambda Function URLs, which the original preview design required (raw Function URL, no CloudFront, for speed); a CloudFront-per-preview workaround reintroduces the ~10min provisioning latency previews existed to avoid, and a shared routing distribution breaks the thin-service goal. `deploy-dev`'s IAM trust and permissions narrowed to drop the `pull_request` trust arm and all `pr-*`-named resource grants (break-glass local apply, applied and verified live: 1 added/1 changed/1 destroyed). `cost_allocation_tags.rego`'s dead `tags.pr`/`tags.ttl` branch removed along with its test and fixture (`conftest verify` green). Full rationale: `hops.ai-demo/docs/DECISIONS.md`.
-**Session 7:** `agents.yml`'s `agent-narrate` job now runs real ReviewBot/Triage on Bedrock (PRD §14 Tier 1: "ReviewBot + Triage on Bedrock; agent ledger") instead of the placeholder echo. The agent ledger table (`hello-world-svc-agent-ledger`, DynamoDB on-demand) was created in `bootstrap/` — `agents-inference`'s IAM policy already had `PutItem` scoped to it, waiting. Six real bugs surfaced live and got fixed: the Bedrock model ID needs the `us.*` cross-region inference-profile ARN, not the bare foundation-model ID; Anthropic's one-time account "use case" form (`PutUseCaseForModelAccess`) and a valid AWS Marketplace payment method are both required before any Anthropic model invokes, independent of IAM; a shell-injection hole where LLM-generated/log-derived text spliced via `${{ }}` into a `run:` script could execute as shell (fixed by routing through `env:`, per GitHub's hardening guidance); and three separate log-fetch bugs (`gh run view --log` refuses until the *whole* run completes, fatal since `agent-narrate` is itself part of that run; `gh` needs `--repo` when the job has no checkout to infer one from; `gh api` silently refuses to print any response containing escape sequences without `--allow-escape-sequences`). `cost_usd_est` now uses the verified real per-token rate from `list-foundation-model-agreement-offers` ($1.10/$5.50 per M tokens), not a guess. Confirmed end-to-end on a throwaway test PR: Triage correctly diagnosed a deliberate lint failure, cited the exact ESLint rule and line, and wrote an accurate ledger row. Release and Incident agents stay documented design only in `AI-GOVERNANCE.md` — Tier 1 doesn't require them, Release's job is already satisfied by the human GitHub Environment approval, and Incident would be bolted onto `RUNBOOK.md`'s already-recorded manual alias flip. Narration was then restructured from unstructured prose into scannable sections (**What failed** / **Error** in a fenced code block / **Why** / **Fix** / **Recommendations**, each omitted rather than padded if it has nothing to add) — a real bug surfaced during that pass: the prompt-building `jq` call was missing `-r`, so Bedrock had been receiving a JSON-quoted string (literal `"..."` and `\n` escapes) instead of the actual prompt text since the feature landed.
-**Session 8:** Fork-isolation scenario (PRD §14 Tier 1, never cut) live-verified — the one Tier-1 item that no unit test can substitute for. Forked `hello-world-svc` to a genuinely separate GitHub account (`quorumless/hello-world-svc`) and opened `hops-poc/hello-world-svc#16` from it. Result: `plan.yml`'s `tofu-plan`/`conftest-terraform` and `agents.yml`'s `agent-narrate` all ran `completed/skipped` — the `head.repo.full_name` fork gate held, no OIDC token was ever requested, let alone denied. Every non-credentialed gate (lint/typecheck/test, gitleaks, Trivy, tofu validate, dockerfile/workflow-integrity policy, SBOM/coverage/infracost reporting) ran and passed normally. PR closed without merging, test branch and fork both deleted; run `33069405789` is the permanent evidence, cited in `hops.ai-demo/docs/DECISIONS.md` §5 scenario 11.
-**Session 9:** `.claude/skills/{ship,watch}` (PRD §11, G1 — console DX, the last Tier 1 gap) built as prompt-driven `gh` wrappers, not a `cli/paved` binary. Live-tested twice end-to-end on real PRs (`hello-world-svc#17`, `#19`): branch → gates → dev → smoke test → human-approved prod → prod → smoke test, a human clicking the actual GitHub Environment approval each time. Testing surfaced two real, previously-undetected gate bugs via a live `USER root` scenario (`demo/scenario-5-root-user`, `hello-world-svc#18`, closed without merge): `conftest-dockerfile` and `workflow-integrity` were both silently running **zero** policies in CI (`conftest test` defaults to the `main` package only without `--all-namespaces`; every rule here lives under a named package) — masked because `conftest verify`'s unit tests don't exercise the same code path as `conftest test`. Fixed (`3b76cc9`), which then exposed a second latent bug: `workflow-integrity`'s own "gate not removed" self-check only recognized an inline `run: conftest ...` step, not this project's actual `uses: .../plan.yml@SHA` reusable-workflow call — fixed (`33e3b52`, new test, 28/28 green) and re-verified live (run `33151397406`: `final stage runs as USER "root"`, correctly blocked). Full story in `hops.ai-demo/docs/DECISIONS.md` §5 scenario 5. Also re-quoted the final bill via a live, read-only Cost Explorer query (below), and recorded both the happy path and the corrected blocked scenario via asciinema (`hops.ai-demo/docs/recordings/`).
-**Session 10:** Bedrock inference blocked account-wide — `invoke-model` returned `ValidationException` Error 002 ("Access to Bedrock models is not allowed for this account"), an account-level block rather than an IAM or model-access-request issue. Swapped ReviewBot/Triage's inference call to NVIDIA NIM's DeepSeek endpoint (`build.nvidia.com`, OpenAI-compatible, free preview tier, model `deepseek-ai/deepseek-v4-pro-0813`, `paved-road@2c60b35`). Ledger schema unchanged; `cost_usd_est` now `0` since this tier isn't metered.
-**Session 11:** Service infra made config-driven for the developer-facing "write yaml, not Terraform" goal. `modules/service` gained `memory`/`timeout`/`log_retention_days`/`dynamodb_billing_mode`/`cloudfront_price_class` inputs (defaults match the prior hardcoded values) and its `Project` tag now uses `name_prefix` instead of a hardcoded literal, so the module is actually reusable across services (`paved-road#1`). The cookiecutter scaffold now generates one `infra/main.tf` (never hand-edited) and `infra/config.yaml` (the only file a developer touches) per service, replacing the old `infra/dev`/`infra/prod` pattern of two hand-copied ~58-line files with the module ref pinned separately in each. `plan.yml`/`deploy.yml` moved from `infra/dev`/`infra/prod` working directories to a single `infra/`, selecting environment via `-var env=...` + `-backend-config="key=<env>/terraform.tfstate"`. `hello-world-svc` migrated live (`hello-world-svc#22`): verified zero resource drift before merging (PR-time plan showed only the expected placeholder-image-digest diff), then a real `deploy-dev` → smoke test → human-approved `deploy-prod` → smoke test ran clean end-to-end on the new pattern. Follow-up (`paved-road#2`) pointed the scaffold's default `paved_road_ref` at the proven commit instead of a placeholder.
-**Session 12:** `modules/service`'s Lambda now exposes `APP_ENV`/`APP_BUILD` (`paved-road#4`) — reuses the module's existing `env`/`image_uri` inputs, no new Terraform variables or `deploy.yml` changes needed. `hello-world-svc` added a `/api/version` endpoint and renders `env: <env> · build: <short digest>` on the homepage (`hello-world-svc#24`, falls back to `local`/`dev` when the vars are unset), then bumped its `module_ref` pin to `076cb75` (`hello-world-svc#25`) and deployed through the real pipeline to both dev and prod. Confirmed live: dev returns `env: dev`, prod returns `env: prod`, both `build: 3bb08e77cba4`.
-**Session 13:** Infracost's `plan.yml` job (live since session 3) turned out to be silently broken — its cost breakdown only ever reached raw CI logs, never a PR comment or job summary. Investigating further found the product had moved on entirely: the classic static-API-key + `breakdown` CLI is deprecated, dashboard-issued static keys are gone (now via `infracost ci setup`/CLI OAuth login), and the v2 CLI doesn't auto-discover `infracost-usage.yml` without an explicit `infracost.yml` project config pointing at it. Removed the dead `infracost-report` job from `plan.yml` (`paved-road@6417385`) and replaced it with `infracost/actions/diff` — real PR cost-diff comments — scaffolded into both `hello-world-svc` and the cookiecutter template (`paved-road@44643b2`, `@662129f`) so future services get it by default. Filled `infracost-usage.yml` with real very-low-traffic assumptions and added the missing `infracost.yml`; verified live, the PR comment now shows real FinOps/tagging policy findings and a real cost delta (`hello-world-svc#26`–`#28`).
-**Session 14:** Two small fixes, both in `infra/main.tf` for `hello-world-svc` and the cookiecutter template. `default_tags` (`Service`/`Environment`) added to the AWS provider so Infracost Cloud's FinOps tagging policy passes without per-resource tags in `modules/service` (`paved-road@a6cdbce`, `hello-world-svc@9b35963`) — verified live via `hello-world-svc#30`, which bumped Lambda memory to 1024MB to force a real plan diff and confirm the tag fix and cost-diff reporting together. Separately, `hello-world-svc` and the template each got a minimal `devbox.json` (`bun`, `gh`) + `.envrc` so a service developer gets a `direnv allow`-activated dev shell without depending on the platform workspace's devbox — `hello-world-svc#31`, merged.
-**Session 15:** Onboarded a second service (`tic-tac-toe-svc`) to prove the platform generalizes, not a one-off. `bootstrap/` generalized from one hardcoded service to a `services` list (`paved-road#5`) — per-service ECR repos via `for_each`, IAM trust/resource ARNs looped across the list, ledger table deliberately kept single/shared. That onboarding surfaced two real bugs: the cookiecutter template's `ci.yml` was stale (missing `agents-narrate`'s required `gates_result` input/secrets) and had no `.trivyignore` at all (Trivy FATALs without one) — both fixed in the template. Bigger find: the deploy backend's Terraform state key was `<env>/terraform.tfstate`, shared bucket-wide instead of per-service — `tic-tac-toe-svc`'s first dev deploy read `hello-world-svc`'s live dev state as drift and destroyed most of it (Lambda, DynamoDB table, log group, function URL, permissions) before an unrelated missing `iam:ListInstanceProfilesForRole` permission stopped the destroy partway through. Prod was never touched (separate key, verified healthy throughout). Fixed the key scheme to `${{ github.event.repository.name }}/<env>/terraform.tfstate` and the missing IAM permission (`paved-road#6`); recovered `hello-world-svc`'s dev environment by migrating its surviving resources (CloudFront distribution, OAC, exec role) onto the new key via `tofu state mv`/`push`, then a real `deploy-dev` → human-approved `deploy-prod` run through `hello-world-svc#33` recreated what was destroyed — verified live, same CloudFront domain, zero further drift. `tic-tac-toe-svc` was then decommissioned as a demo-scope decision (not a platform problem): AWS resources destroyed, removed from bootstrap's `services` list (`paved-road#7`), GitHub repo deleted. The `services` list mechanism stays for the next real service.
+No step leaves the console. Runtime is an arm64 container Lambda behind CloudFront —
+one immutable image digest built once and promoted dev → prod.
 
-- `bootstrap/` — GitHub OIDC provider, the four per-purpose IAM roles (`plan-readonly`,
-  `deploy-dev`, `deploy-prod`, `agents-inference`), the shared Terraform state backend
-  (`hops-poc-paved-road-tfstate` S3 bucket + `paved-road-tfstate-lock` DynamoDB table), one ECR
-  repo per onboarded service (one immutable digest promoted dev→prod each), and the agent
-  ledger table (`hello-world-svc-agent-ledger`, DynamoDB on-demand, shared across all services).
-  IAM trust/resource scoping is driven by a `services` list (session 15) — add a repo by
-  extending it. Currently onboards `hello-world-svc` only.
-  See `bootstrap/README.md` before touching trust policies.
-- `templates/service/` — the cookiecutter scaffold. `hello-world-svc` is its output;
-  the generated repo's thinness is the product demo, not a placeholder.
-- `modules/service/` — the reusable runtime stack: arm64 container Lambda (Bun + Lambda Web
-  Adapter) behind a `live` alias → Function URL (AWS_IAM) → CloudFront via OAC → DynamoDB.
-  Config-driven — memory, timeout, log retention, DynamoDB billing mode, and CloudFront price
-  class are module inputs, set per-service via a single `infra/main.tf` + `infra/config.yaml`
-  (the only file a developer edits). Function URL grants both `lambda:InvokeFunctionUrl` and
-  `lambda:InvokeFunction` (required since Oct 2025). Lambda environment exposes `APP_ENV`
-  (`var.env`) and `APP_BUILD` (`var.image_uri`) for the running service to report its own
-  identity.
-- `.github/workflows/` — the three reusable workflows: `plan.yml` (blocking + reporting gates,
-  fork-isolated), `deploy.yml` (dev deploy → smoke test → narrate-dev, human-approved prod
-  deploy → smoke test → narrate-prod), `agents.yml` (the `agent-narrate` checkpoint after
-  gates — real ReviewBot/Triage on NVIDIA NIM's DeepSeek endpoint (Bedrock is blocked
-  account-wide, session 10), posting AI-generated PR comments and writing to the ledger table
-  on gate failures; `narrate-dev`/`narrate-prod` stay no-op placeholders — Release/Incident are
-  documented design only, PRD §14 Tier 1 scope).
-- `policies/` — 9 OPA/Conftest policies across three namespaces (`terraform/`, `dockerfile/`,
-  `workflows/`), 28 tests, `conftest verify -p policies` → 28/28. See `policies/README.md`.
+| | |
+|---|---|
+| **Account / region** | `281832122084` / `us-east-1` |
+| **Onboarded services** | `hello-world-svc` |
+| **Cost to date** | $0.0023 (guardrail ≤ $25) |
 
-## Not built
+---
 
-- `cli/paved` — not started; `ship`/`watch` are prompt-driven `gh` wrappers instead (Session 9).
-  Fork isolation and scenario 5 are live-verified via real PRs (Sessions 8–9), each closed and
-  deleted after — no `demo/*` branch is left standing in either repo.
-- The incident/canary stack (scheduled-Lambda monitor + CloudWatch alarm) behind
-  `hops.ai-demo/docs/RUNBOOK.md` — design only, not built.
-- Release and Incident agent logic — documented design only, by decision (PRD §14 Tier 1
-  scope). Release's job is already covered by the human GitHub Environment approval.
+## Contents
 
-## Final bill
+- [For service developers](#for-service-developers) — ship a change, create a service, configure infra
+- [For platform maintainers](#for-platform-maintainers) — onboard a repo, change a gate, decommission
+- [How it works](#how-it-works) — the pipeline, the four IAM roles, the agents
+- [Repo layout](#repo-layout)
+- [Status](#status)
 
-$0.0023 through 2026-08-28, live Cost Explorer month-to-date (ECR $0.0011, S3 $0.0011,
-DynamoDB $0.0001; everything else inside free tier). Guardrail: ≤ $25, target ~$10.
+---
+
+## For service developers
+
+### Ship a change
+
+Everything happens through a normal PR. There is no separate deploy command.
+
+```bash
+git switch -c my-change
+# ...edit...
+git push -u origin HEAD
+gh pr create --fill      # → gates run; ReviewBot/Triage comment on failure
+gh pr checks --watch
+gh pr merge --squash     # → deploy to dev → smoke test
+gh run watch             # → parks on the prod Environment approval
+```
+
+Prod deploys only after a human clicks approve on the `prod` GitHub Environment. The
+pipeline presents that approval; nothing approves it automatically.
+
+The scaffold also ships `.claude/skills/{ship,watch}` — prompt-driven `gh` wrappers for
+the same flow. There is no `paved` binary.
+
+### Create a new service
+
+```bash
+cookiecutter templates/service      # from a clone of this repo
+gh repo create <org>/<service> --public --source <service> --push
+```
+
+The generated repo is deliberately thin — its thinness is the point, not a TODO:
+
+| File | You edit it? | What it is |
+|---|---|---|
+| `src/` | **yes** | Bun server: SPA + `/api/*` |
+| `infra/config.yaml` | **yes** | The only infra file you touch — service name, `module_ref` pin, per-env sizing |
+| `infra/main.tf` | no | Reads `config.yaml`, calls `modules/service`. Never hand-edit per environment |
+| `.github/workflows/ci.yml` | no | ~30 lines calling this repo's `plan.yml` / `agents.yml` / `deploy.yml` at a pinned SHA |
+| `infracost.yml` + `infracost-usage.yml` | usage only | Cost-diff PR comments. Without `infracost.yml` the usage file is silently ignored and cost always reports $0 |
+| `.trivyignore` | rarely | Required — Trivy FATALs without one |
+
+Then hand the repo to a platform maintainer for [onboarding](#onboard-a-service)
+(IAM trust, ECR repo, branch protection). Until that lands, credentialed jobs will fail.
+
+### Configure infra
+
+`infra/config.yaml` is the whole interface. Write YAML, not Terraform:
+
+```yaml
+service: my-svc
+module_ref: <paved-road commit SHA>   # bump via PR to upgrade the platform
+
+defaults:                             # applied to every environment
+  memory: 512
+  timeout: 15
+  log_retention_days: 14
+  dynamodb_billing_mode: PAY_PER_REQUEST
+  enable_cloudfront: true
+  cloudfront_price_class: PriceClass_100
+
+environments:
+  dev: {}                             # override any default key per environment
+  prod:
+    memory: 1024
+```
+
+One stack serves both environments; CI selects which with `-var env=<env>` and a
+per-service, per-environment state key
+(`<repo>/<env>/terraform.tfstate`). Upgrading the platform means bumping `module_ref` in
+a PR, like any other change.
+
+Your Lambda gets `APP_ENV` and `APP_BUILD` (image digest) in its environment, so a
+running service can report its own identity.
+
+---
+
+## For platform maintainers
+
+### Onboard a service
+
+`bootstrap/` is applied **locally by a human**, on purpose — a CI role able to onboard a
+service is equally able to rewrite `deploy-prod`'s trust policy and delete the prod
+approval gate. There is no setting in between. See
+[`bootstrap/README.md`](bootstrap/README.md#why-bootstrap-stays-on-break-glass).
+
+1. Add the service to `services` in `bootstrap/variables.tf`:
+
+   ```hcl
+   { name = "my-svc", repo = "my-svc", repo_id = "..." }   # gh api repos/<org>/<repo> --jq .id
+   ```
+
+   `repo_id` is required: GitHub's immutable subject claims put the numeric ID in the
+   OIDC `sub`, and a trust policy written for the legacy name-only format denies every
+   assume-role call.
+
+2. Apply it, and paste the plan into the PR — there is no CI plan job for this stack, so
+   that plan output *is* the review artifact:
+
+   ```bash
+   cd bootstrap && tofu plan && tofu apply
+   ```
+
+   This creates the service's ECR repo and extends all four IAM roles' trust conditions
+   and resource ARNs. Log the apply in `bootstrap/README.md`'s break-glass log.
+
+3. In the service repo's GitHub settings (enforcement has to live outside the diff a PR
+   can edit):
+   - required status checks on `main` for the gate jobs, plus a repo ruleset
+   - CODEOWNERS review on `.github/`, `infra/`, `policies/`
+   - `dev` and `prod` Environments, `prod` requiring a human reviewer
+   - secrets: `NVIDIA_API_KEY` (agent inference), `INFRACOST_API_KEY`
+     (`infracost ci setup --ci-pipeline`)
+
+### Change a gate
+
+Policies live in `policies/` as OPA/Rego across three namespaces. Run the unit suite
+from the repo root:
+
+```bash
+conftest verify -p policies    # 28/28
+```
+
+**`conftest test` requires `--all-namespaces`.** Without it, it evaluates package `main`
+only, every policy here is namespaced, and the gate reports "0 tests" and passes
+trivially. This silently disabled two gates in CI once. Details and the full policy table:
+[`policies/README.md`](policies/README.md).
+
+Renaming `plan.yml`, `deploy.yml`, `agents.yml`, or the `tofu-plan` job **breaks IAM** —
+each role's trust policy matches on `job_workflow_ref`, i.e. the workflow file's path.
+
+### Decommission a service
+
+Order matters, and getting it wrong orphans live AWS resources with unreachable state.
+The checklist is in
+[`bootstrap/README.md`](bootstrap/README.md#decommissioning-a-service--do-this-in-order):
+destroy the service's own `infra/` (both envs) → remove it from `services` and apply →
+delete the GitHub repo **last**.
+
+---
+
+## How it works
+
+### The pipeline
+
+**`plan.yml`** — runs on every PR, fork-isolated. Eight blocking gates:
+
+| Gate | Checks |
+|---|---|
+| `lint-typecheck-test` | ESLint, `tsc`, `bun test` |
+| `gitleaks` | committed secrets |
+| `container-build-scan` | builds the image, Trivy CRITICAL |
+| `tofu-validate` | runs credential-free |
+| `tofu-plan` | assumes `plan-readonly`; uploads plan JSON |
+| `conftest-terraform` | 6 policies against that plan JSON |
+| `conftest-dockerfile` | no root user, digest-pinned `FROM` |
+| `workflow-integrity` | no `pull_request_target` + untrusted checkout, all `uses:` SHA-pinned, no `write-all`, gates not deleted |
+
+Plus two reporting-only jobs (`continue-on-error`): `sbom-license-scan` (Syft
+CycloneDX), `coverage-bundle-report`. Cost diffs come from the service repo's own
+`infracost-diff.yml`.
+
+**`deploy.yml`** — on push to `main`: `deploy-dev` → `smoke-test-dev` → `narrate-dev` →
+**`deploy-prod`** (blocks on the `prod` Environment reviewer) → `smoke-test-prod` →
+`narrate-prod`. The image is built once in dev and promoted to prod by digest.
+
+**`agents.yml`** — `agent-narrate` fires after gates, only on failure. ReviewBot/Triage
+run on NVIDIA NIM's DeepSeek endpoint (Bedrock is blocked account-wide), post a
+structured PR comment (**What failed** / **Error** / **Why** / **Fix** /
+**Recommendations**), and write a row to the agent ledger table. `narrate-dev` /
+`narrate-prod` remain no-op placeholders.
+
+### Fork isolation
+
+The OIDC `sub` claim is identical for a fork PR and a same-repo PR — IAM **cannot** tell
+them apart. The real control is at the workflow layer: any job with
+`id-token: write` is gated on
+`github.event.pull_request.head.repo.full_name == github.repository`, and nothing uses
+`pull_request_target` with an untrusted checkout. Verified live against a real fork PR
+from a separate GitHub account (run `33069405789`): credentialed jobs skipped, no token
+ever requested; every non-credentialed gate ran normally.
+
+### Four IAM roles, four blast radii
+
+One job class → one role → one boundary. Every trust policy matches **both** the OIDC
+`sub` and `job_workflow_ref` — `sub` alone can't tell "can plan" from "can write".
+
+| Role | Assumed by | Can |
+|---|---|---|
+| `plan-readonly` | same-repo PR, `plan.yml` | read/describe only |
+| `deploy-dev` | push to `main`, `deploy.yml` | write `<svc>-dev-*` resources |
+| `deploy-prod` | `environment:prod`, `deploy.yml` | write `<svc>-prod-*`; **unassumable until a human approves** |
+| `agents-inference` | `agents.yml` | one allow-listed model + ledger `PutItem` |
+
+Full table, blast-radius notes, and the trust-policy gotchas that cost real debugging
+time: [`bootstrap/README.md`](bootstrap/README.md).
+
+---
+
+## Repo layout
+
+| Path | What it is |
+|---|---|
+| `bootstrap/` | OIDC provider, the four IAM roles, S3+DynamoDB state backend, per-service ECR repos, agent ledger table. Break-glass, human-applied. **Read its README before touching trust policies.** |
+| `modules/service/` | The runtime stack: arm64 container Lambda (Bun + Lambda Web Adapter) → `live` alias → Function URL (AWS_IAM) → CloudFront via OAC → DynamoDB. Config-driven inputs |
+| `.github/workflows/` | The three reusable workflows service repos call: `plan.yml`, `deploy.yml`, `agents.yml` |
+| `policies/` | 9 OPA/Conftest policies in three namespaces, 28 tests |
+| `templates/service/` | The cookiecutter scaffold. `hello-world-svc` is its output |
+| `docs/HISTORY.md` | Session-by-session build log — what broke live and why decisions went the way they did |
+
+---
+
+## Status
+
+**Live and verified end-to-end on real infrastructure:** the full branch → gates → dev →
+human-approved prod flow, fork isolation, policy gates blocking a real bad PR,
+ReviewBot/Triage narration, per-service state isolation, cost-diff PR comments.
+
+**Not built, by decision:**
+
+- `cli/paved` — `ship`/`watch` are prompt-driven `gh` wrappers instead
+- PR preview environments — cut; the org's Resource Control Policy blocks anonymous
+  Lambda Function URLs, and the CloudFront workaround reintroduces the latency previews
+  existed to avoid
+- Release and Incident agents — documented design only; Release's job is already covered
+  by the human Environment approval
+- The incident/canary stack (scheduled-Lambda monitor + CloudWatch alarm) — design only
+
+**Cost:** $0.0023 through 2026-08-28, live Cost Explorer month-to-date (ECR $0.0011, S3
+$0.0011, DynamoDB $0.0001; everything else inside free tier). Guardrail ≤ $25, target
+~$10.
+
+Spec and rationale live in the planning workspace (`hops.ai-demo`) until final —
+`DECISIONS.md` and `AI-GOVERNANCE.md` land here at the repo root once they're out of
+draft.
