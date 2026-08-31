@@ -116,3 +116,10 @@ still has no CI apply route of its own.
   check), leaving `hello-world-svc-dev-exec` orphaned instead of cleanly
   replaced. Recovery documented in paved-road#6. 0 added, 2 changed, 0
   destroyed.
+- Session 8: tic-tac-toe-svc decommissioned (demo scope decision, not a
+  platform problem) — removed from `services` in `variables.tf`, tearing
+  down its ECR repo and narrowing the 4 IAM roles' trust/resource ARNs
+  back to hello-world-svc only. The `services` list mechanism itself
+  stays — more services are coming and this is the intended path to add
+  them. hello-world-svc untouched throughout. 0 added, 6 changed, 2
+  destroyed.

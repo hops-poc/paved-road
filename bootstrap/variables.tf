@@ -18,7 +18,6 @@ variable "services" {
   }))
   default = [
     { name = "hello-world-svc", repo = "hello-world-svc", repo_id = "1345034033" },
-    { name = "tic-tac-toe-svc", repo = "tic-tac-toe-svc", repo_id = "1352315389" },
   ]
 }
 
