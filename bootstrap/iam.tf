@@ -178,9 +178,26 @@ data "aws_iam_policy_document" "plan_readonly_perms" {
       "cloudwatch:Describe*", "cloudwatch:Get*", "cloudwatch:List*",
       "budgets:View*", "budgets:Describe*",
       "tag:Get*",
-      "s3:GetObject", "s3:ListBucket", # read the state file being planned against
     ]
     resources = ["*"] # plan is read-only; a *:Get/List/Describe policy has no mutation blast radius
+  }
+
+  # State reads are scoped to the state-key shape, not the whole bucket —
+  # same convention as deploy-dev/deploy-prod's StateObjects statements below
+  # (see the comment there for why). plan-readonly is shared across every
+  # service's plan job and plans against either environment, so it gets both
+  # env globs; it never writes.
+  statement {
+    sid       = "ReadStateObjects"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*/dev/terraform.tfstate", "${aws_s3_bucket.tfstate.arn}/*/prod/terraform.tfstate"]
+  }
+  statement {
+    sid       = "ListStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tfstate.arn]
   }
 
   # tofu plan still acquires the state lock (not just apply) — found live:
@@ -188,8 +205,7 @@ data "aws_iam_policy_document" "plan_readonly_perms" {
   # dynamodb:GetItem/PutItem against the lock table, because this role was
   # scoped assuming "read-only" meant "no lock-table access needed." Same
   # lock actions deploy-dev/deploy-prod already have, scoped to the lock
-  # table only — the S3 state object read above stays on the wildcard
-  # Get/List statement since it's genuinely read-only.
+  # table only.
   statement {
     sid       = "StateLock"
     effect    = "Allow"
@@ -306,11 +322,37 @@ data "aws_iam_policy_document" "deploy_dev_perms" {
     ]
     resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-dev-exec"]
   }
+  # Backend key is "<service>/<env>/terraform.tfstate" (plan.yml/deploy.yml
+  # pass it via -backend-config). Scope the object grant to that literal
+  # shape, not "${bucket}/*": a bucket-wide grant is the same failure mode
+  # that caused the session-8 incident from the other direction — one
+  # service's dev deploy reached another service's live state and destroyed
+  # most of it. The key collision was fixed in the workflows; this closes the
+  # permission that let it be reachable at all. deploy-dev can touch dev
+  # state objects only, for any service, and nothing else in the bucket.
+  # ListBucket is unscopable below the bucket ARN (it's a bucket-level
+  # action) — the backend needs it to check for an existing state object.
   statement {
-    sid       = "StateBackend"
+    sid       = "StateObjects"
     effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
-    resources = [aws_s3_bucket.tfstate.arn, "${aws_s3_bucket.tfstate.arn}/*", aws_dynamodb_table.tfstate_lock.arn]
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*/dev/terraform.tfstate"]
+  }
+  statement {
+    sid       = "ListStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tfstate.arn]
+  }
+  # Not scoped further: the lock table's item key is the state key itself, so
+  # per-service scoping would need a dynamodb:LeadingKeys condition. The
+  # blast radius of the whole table is a stuck lock, not state loss — the
+  # state objects above are where the durable damage lives. Deliberate.
+  statement {
+    sid       = "StateLock"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    resources = [aws_dynamodb_table.tfstate_lock.arn]
   }
 }
 
@@ -389,11 +431,26 @@ data "aws_iam_policy_document" "deploy_prod_perms" {
     ]
     resources = [for s in local.services : "arn:aws:iam::${local.account_id}:role/${s.name}-prod-exec"]
   }
+  # Same split and same reasoning as deploy-dev's StateObjects/StateLock —
+  # prod key shape only. This is the statement that keeps a dev-scoped role
+  # and a prod-scoped role from being able to overwrite each other's state.
   statement {
-    sid       = "StateBackend"
+    sid       = "StateObjects"
     effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
-    resources = [aws_s3_bucket.tfstate.arn, "${aws_s3_bucket.tfstate.arn}/*", aws_dynamodb_table.tfstate_lock.arn]
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.tfstate.arn}/*/prod/terraform.tfstate"]
+  }
+  statement {
+    sid       = "ListStateBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tfstate.arn]
+  }
+  statement {
+    sid       = "StateLock"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    resources = [aws_dynamodb_table.tfstate_lock.arn]
   }
 }
 

@@ -6,6 +6,7 @@ resource "aws_ecr_repository" "service" {
   for_each             = local.services
   name                 = each.key
   image_tag_mutability = "IMMUTABLE" # §5.3: immutable tags, reference by digest
+  force_delete         = true        # decommissioning a service must not get stuck on "repository not empty" — found live
 
   image_scanning_configuration {
     scan_on_push = true

@@ -12,14 +12,22 @@ terraform {
     }
   }
 
-  # Local state until step 3 of bootstrap/README.md. Then:
-  # backend "s3" {
-  #   bucket         = "<gh_org>-paved-road-tfstate"
-  #   key            = "bootstrap/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "paved-road-tfstate-lock"
-  #   encrypt        = true
-  # }
+  # The bucket and lock table this points at are created by this stack's own
+  # state.tf, so a first-ever apply runs on local state with this block
+  # commented out, then migrates (step 3 of bootstrap/README.md). Both exist,
+  # so it is live: bootstrap's state belongs in the versioned bucket, not only
+  # in a laptop-local file whose loss means hand-importing ~20 resources.
+  # The key can't collide with a service's "<service>/<env>/terraform.tfstate"
+  # and sits deliberately outside the "*/dev/*" and "*/prod/*" globs
+  # deploy-dev/deploy-prod are scoped to in iam.tf — no CI role can read or
+  # write it, which is the point (DECISIONS.md §3).
+  backend "s3" {
+    bucket         = "hops-poc-paved-road-tfstate"
+    key            = "bootstrap/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "paved-road-tfstate-lock"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

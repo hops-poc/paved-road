@@ -63,10 +63,15 @@ and don't get this backwards.
 2. `tofu apply` — creates the OIDC provider, the `<org>-paved-road-tfstate`
    S3 bucket (versioned), the `paved-road-tfstate-lock` DynamoDB table, and
    the four roles
-3. Uncomment the `backend "s3"` block in `main.tf`, then
-   `tofu init -migrate-state` — moves bootstrap's own state into the
-   bucket it just created. From here on every stack (`dev/`, `prod/`,
-   and this one) is S3-backed, per-stack state file (PRD §5.4).
+3. `tofu init -migrate-state` — the `backend "s3"` block in `main.tf` is now
+   live (key `bootstrap/terraform.tfstate`, deliberately outside the
+   `*/dev/*` and `*/prod/*` globs `deploy-dev`/`deploy-prod` are scoped to in
+   `iam.tf`, so no CI role can read or write it). This moves bootstrap's own
+   state into the bucket it created in step 2. From here on every stack
+   (`dev/`, `prod/`, and this one) is S3-backed, per-stack state file
+   (PRD §5.4). Until it runs, the only copy of bootstrap's state is the local
+   `terraform.tfstate` — losing it means hand-importing ~20 resources to
+   recover account control.
 
 DynamoDB lock table, not S3 native locking: OpenTofu 1.8+ supports S3's
 native `use_lockfile` locking, but DynamoDB is kept for now to avoid
@@ -78,8 +83,59 @@ apply with a long-lived admin credential is break-glass only, invoked
 explicitly by a human with the reason recorded (hops.ai-demo's
 `CLAUDE.md` hard constraints, `DECISIONS.md` §3). `deploy-dev`'s trust and
 permissions were narrowed the same way after PR previews were cut (dropped
-the `pull_request` trust arm and all `pr-*`-named resource grants) — `bootstrap/`
-still has no CI apply route of its own.
+the `pull_request` trust arm and all `pr-*`-named resource grants).
+
+## Why bootstrap stays on break-glass
+
+Not an unfinished chicken-and-egg leftover — a decision (`DECISIONS.md` §3).
+Onboarding a service edits all four roles' trust policies, so any CI apply
+role needs `iam:UpdateAssumeRolePolicy` on them, and AWS has no condition key
+that constrains a trust policy's *content* (a permissions boundary bounds what
+a role can do, not who can assume it). A role able to add a service is
+therefore equally able to swap `deploy-prod`'s `environment:prod` subject for
+`pull_request` and silently delete the human prod approval gate. Tighten the
+boundary enough to stop that and onboarding stops too; there is no setting
+in between. Break-glass survives either way — creating the apply role,
+recovering a trust policy CI broke, clearing a stuck state lock — so CI apply
+adds a second always-on, PR-reachable door rather than closing the first.
+`infra/` is CI-applied because it's frequent, multi-author and rebuildable;
+this stack has been applied six times ever (the initial apply plus the five
+logged below), by one person, and it is the trust anchor for every service.
+
+**Review convention for `bootstrap/**` PRs:** there is no CI plan job for this
+stack, so the author runs `tofu plan` locally and pastes the output into the
+PR description. That plan is the review artifact — a `bootstrap/` PR without
+one can't be reviewed, only trusted.
+
+## Decommissioning a service — do this in order
+
+The first tic-tac-toe-svc decommission (below) only did step 2 — it removed
+the service from `variables.tf` and tore down its ECR repo, but never touched
+the service's own `infra/` state (Lambda, DynamoDB, CloudFront, exec role, in
+both dev and prod). That state lived in the service's own repo, so deleting
+the GitHub repo first orphaned it: the resources kept running, live, in AWS,
+undetected until the same service was re-onboarded and its first deploy
+inherited the leftover state. Correct order, every time:
+
+1. **Destroy the service's own infra first**, both environments, from the
+   service repo's `infra/` directory, against the *service's* state (not
+   bootstrap's) — this is what was skipped:
+   ```
+   cd infra
+   AWS_PROFILE=poc-user tofu init -backend-config="key=<service>/dev/terraform.tfstate" -reconfigure
+   AWS_PROFILE=poc-user tofu destroy -var env=dev -var image_uri=placeholder
+   # repeat with prod/terraform.tfstate and -var env=prod
+   ```
+2. **Remove the service from `variables.tf`'s `services` list and apply** —
+   tears down its ECR repo (needs `force_delete = true` on
+   `aws_ecr_repository.service`, see `ecr.tf` — an immutable-tag repo that
+   ever received a push is never empty otherwise, and `tofu apply` fails
+   mid-way with the trust/resource narrowing already done and only the ECR
+   destroy left stuck) and narrows the 4 roles' trust/resource ARNs back to
+   the remaining services.
+3. **Delete the GitHub repo last**, only after 1 and 2 are both clean — it's
+   the thing that makes the service's state unreachable, so it must go last,
+   not first.
 
 **Break-glass log:**
 - Session 5: `aws_dynamodb_table.agent_ledger` (`ledger.tf`) — created the
@@ -123,3 +179,29 @@ still has no CI apply route of its own.
   stays — more services are coming and this is the intended path to add
   them. hello-world-svc untouched throughout. 0 added, 6 changed, 2
   destroyed.
+- Session 8 (re-run): tic-tac-toe-svc re-onboarded to demonstrate the
+  platform deploys arbitrary services, not just hello-world-svc — full
+  branch→gates→dev→human-approved-prod flow re-verified live, then
+  decommissioned again per the same demo-scope decision. This pass also
+  applied the state-backend S3 scoping fix (`iam.tf`: `deploy-dev`/
+  `deploy-prod`/`plan-readonly`'s bucket-wide grants split to per-env
+  `*/dev/terraform.tfstate` and `*/prod/terraform.tfstate`) and migrated
+  bootstrap's own state to S3 (`main.tf`) — see `DECISIONS.md` §3. Onboard
+  apply: 2 added, 7 changed, 0 destroyed. Found live during re-onboarding:
+  the *previous* decommission above never destroyed tic-tac-toe-svc's own
+  `infra/` state (dev+prod Lambda/DynamoDB/CloudFront/exec role, 11
+  resources each) — orphaned when its repo was deleted, silently still
+  running in AWS this whole time, inherited by this pass's first deploy
+  instead of being created fresh. This time: destroyed both environments'
+  service infra explicitly (22 resources) *before* touching bootstrap —
+  see "Decommissioning a service" above, added as a standing checklist so
+  this doesn't repeat. Decommission apply: 0 added, 6 changed, 2 destroyed
+  (ECR repo required `force_delete = true`, added to `ecr.tf`, plus a
+  one-time manual `ecr batch-delete-image` since the flag can't retroactively
+  apply to a resource being removed in the same apply). Also found and
+  fixed: the cookiecutter template's `server.ts` was missing `development:
+  false` on `Bun.serve()` — a fix `hello-world-svc` already carried but
+  that never made it back into `templates/service/`, so tic-tac-toe-svc's
+  first deploy hit the same "Blocked: Host header does not match the dev
+  server" 403 hello-world-svc had already fixed. Backported to the template.
+  hello-world-svc untouched throughout.
