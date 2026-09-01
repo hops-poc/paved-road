@@ -1,10 +1,14 @@
 # THE deployable artifact (PRD §5.3) — Trivy and the Dockerfile policies
 # (USER root, unpinned tags) apply to this, because this is what ships.
 # Digest-pinned base, not `latest` (scenario 2).
-# Digest verified live via `docker buildx imagetools inspect oven/bun:1.2.4-slim`
-# (multi-arch index digest, not a fabricated placeholder) — re-verify before
-# using in a real build if this drifts.
-FROM oven/bun:1.2.4-slim@sha256:c377a08d0711e47c23a8ad8cf9a924cf9abeae4c9031dfa56be2f1786e0f8ce7 AS base
+# 1.2.4-slim (debian:bullseye-slim, EOL) had 7 CRITICAL CVEs Trivy correctly
+# blocked on live — gate working as designed, base image just needed
+# updating. 1.4.0-slim builds on debian:trixie-slim (current stable,
+# verified against oven-sh/bun's dockerhub/debian-slim/Dockerfile on
+# GitHub). Digest verified live via the registry API's manifest-list
+# digest for oven/bun:1.4.0-slim (multi-arch index, not fabricated) —
+# re-verify before using in a real build if this drifts.
+FROM oven/bun:1.4.0-slim@sha256:e0ee68d16ccb9927bf02aa7dd8fd4bf3369ee6d46da04faa72b05ce8bfd135f6 AS base
 WORKDIR /app
 
 COPY package.json bun.lock* ./

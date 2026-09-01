@@ -54,7 +54,11 @@ the same flow. There is no `paved` binary.
 ### Create a new service
 
 ```bash
-cookiecutter templates/service      # from a clone of this repo
+# from a clone of this repo. paved_road_ref has no default on purpose — it
+# pins both the module and the reusable workflows, and a hardcoded default
+# silently rots (it once sat 22 commits behind, pinning deploy.yml to a SHA
+# older than the per-service state-key fix).
+cookiecutter templates/service paved_road_ref=$(git rev-parse HEAD)
 gh repo create <org>/<service> --public --source <service> --push
 ```
 

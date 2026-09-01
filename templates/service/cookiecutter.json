@@ -3,6 +3,6 @@
   "gh_org": "hops-poc",
   "description": "A trivial service shipped through the paved road",
   "aws_region": "us-east-1",
-  "paved_road_ref": "2bb999ac18f83dfb8979eb1ef8de9cf388183134",
+  "paved_road_ref": "PASS_THIS_EXPLICITLY",
   "_copy_without_render": [".github/workflows/infracost-diff.yml", ".github/workflows/ci.yml"]
 }
