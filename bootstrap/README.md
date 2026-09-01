@@ -133,11 +133,35 @@ inherited the leftover state. Correct order, every time:
    mid-way with the trust/resource narrowing already done and only the ECR
    destroy left stuck) and narrows the 4 roles' trust/resource ARNs back to
    the remaining services.
-3. **Delete the GitHub repo last**, only after 1 and 2 are both clean — it's
+3. **Delete the state-lock digest rows.** `tofu destroy` empties the state
+   object but leaves the `-md5` digest row DynamoDB's state-locking writes
+   alongside it. A leftover row makes the *name* permanently undeployable:
+   the next `tofu init` on that key reads a digest, finds no matching S3
+   object, and dies with `state data in S3 does not have the expected
+   content` — an error that blames S3 latency and says nothing about the row
+   that actually caused it. Found live on tic-tac-toe-svc's second
+   re-onboarding, whose first deploy failed on rows the previous
+   decommission left behind.
+   ```
+   for env in dev prod; do
+     AWS_PROFILE=poc-user aws dynamodb delete-item \
+       --table-name paved-road-tfstate-lock --region us-east-1 \
+       --key "{\"LockID\":{\"S\":\"hops-poc-paved-road-tfstate/<service>/$env/terraform.tfstate-md5\"}}"
+   done
+   ```
+4. **Delete the GitHub repo last**, only after 1–3 are all clean — it's
    the thing that makes the service's state unreachable, so it must go last,
    not first.
 
 **Break-glass log:**
+- Session 16: tic-tac-toe-svc onboarded again (`repo_id` 1353322514) as an
+  end-to-end check that the paved road generalizes without platform edits.
+  2 added (ECR repo + lifecycle policy), 6 changed (4 trust policies, 2
+  permission policies), 0 destroyed — hello-world-svc untouched. The check
+  found four template faults and one decommission gap before it went green;
+  see the repo README's session log. The decommission gap is step 3 above:
+  the previous teardown left `-md5` digest rows in `paved-road-tfstate-lock`
+  for both environments, and the first deploy failed on them.
 - Session 5: `aws_dynamodb_table.agent_ledger` (`ledger.tf`) — created the
   `hello-world-svc-agent-ledger` table that `agents_inference`'s
   `WriteLedgerOnly` statement already scoped a `PutItem` grant to, so
