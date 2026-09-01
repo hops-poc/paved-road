@@ -162,6 +162,27 @@ inherited the leftover state. Correct order, every time:
   see the repo README's session log. The decommission gap is step 3 above:
   the previous teardown left `-md5` digest rows in `paved-road-tfstate-lock`
   for both environments, and the first deploy failed on them.
+- Session 16: tic-tac-toe-svc decommissioned again (same demo-scope decision
+  as before — the platform check was the deliverable, not the service).
+  Ran the four-step checklist above in order, and it held: `infra/` destroyed
+  first, 11 resources per environment, 22 total; then bootstrap narrowed —
+  0 added, 6 changed, 2 destroyed. `force_delete = true` on
+  `aws_ecr_repository.service` did its job this time, so the repo destroyed
+  cleanly with no manual `ecr batch-delete-image` (that was the previous
+  pass's manual step). Step 3 was needed exactly as written: `tofu destroy`
+  left both state objects present-but-emptied (262 bytes) and both `-md5`
+  digest rows intact. Deleted the rows, then purged all 31 object versions
+  under `tic-tac-toe-svc/` — the bucket is versioned, so a plain delete only
+  writes a marker and leaves the state readable. Verified zero remaining
+  across Lambda/DynamoDB/logs/ECR/IAM/CloudFront distributions and OACs, and
+  that all four roles' trust and permission documents no longer name the
+  service. GitHub repo deleted last. hello-world-svc untouched throughout.
+
+  Worth noting for the next teardown: the ledger row for run
+  `33492018442` in `hello-world-svc-agent-ledger` still references the
+  deleted repo. That is deliberate — the ledger is an audit trail (PRD §8),
+  so its rows outlive the repos they describe and must not be cleaned up
+  alongside them.
 - Session 5: `aws_dynamodb_table.agent_ledger` (`ledger.tf`) — created the
   `hello-world-svc-agent-ledger` table that `agents_inference`'s
   `WriteLedgerOnly` statement already scoped a `PutItem` grant to, so
